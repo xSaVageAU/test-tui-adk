@@ -126,7 +126,27 @@ func renderTool(s theme.Styles, name string, args map[string]any, status string,
 	case confirmStatusDenied:
 		statusStyle = s.ToolConfirmDenied
 	}
-	return callLine + "\n" + s.ToolGutter.Render(toolGutter) + statusStyle.Render(status)
+	return callLine + "\n" + renderToolStatusLine(s, statusStyle, status, width)
+}
+
+// renderToolStatusLine word-wraps a tool's status text to width (minus
+// the gutter's own width) and prefixes every wrapped line with the
+// gutter, so a long line stays aligned under the call line above it
+// instead of overflowing unbroken off the right edge. Short results
+// (list_files-style counts/key=value pairs) render on one line same as
+// before; this only matters once results can run to a sentence or more —
+// which agent-as-tool specialist calls do, since their result is the
+// specialist's full prose answer (see summarizeResult).
+func renderToolStatusLine(s theme.Styles, style lipgloss.Style, text string, width int) string {
+	prefix := s.ToolGutter.Render(toolGutter)
+	wrapWidth := max(width-lipgloss.Width(prefix), 1)
+	wrapped := lipgloss.NewStyle().Width(wrapWidth).Render(text)
+
+	lines := strings.Split(wrapped, "\n")
+	for i, line := range lines {
+		lines[i] = prefix + style.Render(line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // renderUsage draws the quiet per-turn token-cost line under an agent
@@ -198,15 +218,24 @@ func formatKV(m map[string]any) string {
 	return strings.Join(parts, " ")
 }
 
+// summarizeResult formats a tool result generically. A single-string
+// value (e.g. agent-as-tool's {"result": "<specialist's full answer>"})
+// renders bare, with no "key=" prefix — it reads as prose, not data, and
+// the tool name on the line above already says where it came from. A
+// single-list value (e.g. list_files's {"files": [...]}) summarizes as a
+// count plus the list. Anything else falls back to plain key=value pairs.
 func summarizeResult(result map[string]any) string {
 	if len(result) == 1 {
 		for k, v := range result {
-			if list, ok := v.([]any); ok {
-				items := make([]string, len(list))
-				for i, e := range list {
+			switch val := v.(type) {
+			case string:
+				return strings.TrimSpace(val)
+			case []any:
+				items := make([]string, len(val))
+				for i, e := range val {
 					items[i] = fmt.Sprint(e)
 				}
-				return fmt.Sprintf("%d %s — %s", len(list), k, strings.Join(items, ", "))
+				return fmt.Sprintf("%d %s — %s", len(val), k, strings.Join(items, ", "))
 			}
 		}
 	}

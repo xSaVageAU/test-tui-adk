@@ -24,6 +24,7 @@ import (
 	"google.golang.org/adk/v2/model/gemini"
 	"google.golang.org/adk/v2/runner"
 	"google.golang.org/adk/v2/tool"
+	"google.golang.org/adk/v2/tool/agenttool"
 	"google.golang.org/adk/v2/tool/functiontool"
 	"google.golang.org/adk/v2/tool/toolconfirmation"
 
@@ -34,11 +35,14 @@ const (
 	appName = "tui-testing"
 	userID  = "local-user"
 
-	// AgentName is the root agent's name. session.Event.Author equals
-	// this until the model transfers to one of the specialists below —
-	// exported so callers (the boot banner's initial "agent" line, via
-	// ui.AppConfig.AgentName) can display it without duplicating the
-	// string.
+	// AgentName is the root agent's name — the only agent that ever
+	// speaks; session.Event.Author is always this, since the specialists
+	// below are consulted via agent-as-tool (agenttool.New), not transfer
+	// (agent.Config.SubAgents) — the root calls them like a function and
+	// stays in control, rather than handing the conversation off to a
+	// different visible identity. Exported so callers (the boot banner's
+	// initial "agent" line, via ui.AppConfig.AgentName) can display it
+	// without duplicating the string.
 	AgentName = "assistant"
 
 	researchAgentName = "research"
@@ -48,9 +52,10 @@ const (
 	rootInstruction = "You are the front-line assistant embedded in a terminal chat UI test harness. " +
 		"Keep replies short — this is a test harness for the UI, not a place for long essays. " +
 		"You have a list_files tool for browsing the working directory; use it whenever it's relevant. " +
-		"You can transfer to three specialists when a request clearly fits their focus: research " +
-		"(reading code/docs, answering questions), coder (writing/editing code), and planner (breaking " +
-		"work into steps). Handle general requests yourself rather than transferring unnecessarily."
+		"You can consult three specialists via tool calls when a request clearly fits their focus: research " +
+		"(reading code/docs, answering questions), coder (writing/editing code), and planner (breaking work " +
+		"into steps). Incorporate what they tell you into your own reply — you're still the one answering " +
+		"the user. Handle general requests yourself rather than consulting a specialist unnecessarily."
 
 	researchInstruction = "You are the research specialist in a terminal chat UI test harness: read code " +
 		"and docs, answer questions accurately and concisely. Use list_files to browse the working " +
@@ -69,10 +74,12 @@ const (
 // duplicating the string or reaching into adk's internals for it.
 const ModelName = "gemini-3.1-flash-lite"
 
-// Client is a single ADK agent tree — a root agent that can transfer to
-// three specialist sub-agents — backed by a sqlite-persisted session
-// store (conversation history survives a restart; see store.go). No
-// long-term memory: an earlier pass wired one up via ADK's
+// Client is a single ADK agent — a root agent with three specialists
+// available as agent-as-tool calls (research, coder, planner), never as
+// transfer targets, so there's exactly one voice in the conversation no
+// matter what the root ends up consulting — backed by a sqlite-persisted
+// session store (conversation history survives a restart; see store.go).
+// No long-term memory: an earlier pass wired one up via ADK's
 // memory.Service, but it turned out to just be keyword search over raw
 // stored transcript, not anything resembling durable remembered facts —
 // pulled back out rather than keep something that didn't match what was
@@ -156,8 +163,18 @@ func New(ctx context.Context, apiKey string) (*Client, error) {
 		Model:       model,
 		Description: "A general-purpose assistant for testing the TUI against a real LLM.",
 		Instruction: rootInstruction,
-		Tools:       []tool.Tool{listFilesTool},
-		SubAgents:   []agent.Agent{research, coder, planner},
+		// agenttool.New wraps each specialist as an ordinary callable
+		// tool: the root calls it, gets a result back, and stays the one
+		// answering — no SubAgents, no transfer, no change in who's
+		// "speaking." nil Config leaves SkipSummarization false, so the
+		// root gets a chance to fold each specialist's answer into its
+		// own words rather than just relaying it verbatim.
+		Tools: []tool.Tool{
+			listFilesTool,
+			agenttool.New(research, nil),
+			agenttool.New(coder, nil),
+			agenttool.New(planner, nil),
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create agent: %w", err)
@@ -281,29 +298,11 @@ func (c *Client) runStream(ctx context.Context, sessionID string, msg *genai.Con
 		seenCalls := map[string]bool{}
 		seenResults := map[string]bool{}
 		seenConfirmations := map[string]bool{}
-		lastAuthor := ""
 
 		for event, err := range c.runner.Run(ctx, userID, sessionID, msg, cfg) {
 			if err != nil {
 				send(ui.StreamChunk{Err: fmt.Errorf("run: %w", err)})
 				return
-			}
-
-			// Author is set on every event to whichever agent is currently
-			// handling the conversation — the runner resolves real
-			// multi-agent transfer itself (findAgentToRun, unexported, walks
-			// session history by Author), sticking with whoever last spoke
-			// across turns too. Reporting a change here — deduped against
-			// the last author *this call* has seen, "user" excluded since
-			// that's the author on the event recording the message we just
-			// sent — lets the UI notice a transfer without knowing anything
-			// about ADK's agent tree; it just compares against whichever
-			// name it already has and no-ops if nothing changed.
-			if author := event.Author; author != "" && author != "user" && author != lastAuthor {
-				lastAuthor = author
-				if !send(ui.StreamChunk{AgentSwitch: &ui.AgentSwitch{Name: author}}) {
-					return
-				}
 			}
 
 			// The aggregator's Close() result — see runStream's doc comment
