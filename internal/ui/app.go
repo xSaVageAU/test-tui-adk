@@ -467,16 +467,36 @@ func readStreamChunk(ch <-chan StreamChunk) tea.Cmd {
 	}
 }
 
-// accumulateUsage sums token counts into the running total for the turn
-// in progress — a turn can invoke the model more than once, so this adds
-// rather than overwrites. See turnUsage's doc comment.
+// accumulateUsage folds one model call's usage into the running total for
+// the turn in progress — a turn can invoke the model more than once (e.g.
+// once to decide on a tool call, again after the result comes back).
+//
+// Prompt is NOT summed across calls: each call's PromptTokenCount is
+// already a cumulative snapshot of the entire conversation sent to the
+// model up to that point (the whole point of a "prompt" is it includes
+// everything before it), so a later call's prompt count already contains
+// an earlier call's in full. Summing them double-counted that shared
+// history — a turn with one intermediate tool call was reporting roughly
+// (first call's full context) + (second call's full context, which
+// already includes the first) instead of just the latter. Since context
+// only grows within a turn, the last call's Prompt is the correct total;
+// max is used rather than "just take the latest value" so this stays
+// correct even if a chunk somehow arrived out of order.
+//
+// Output, in contrast, genuinely is new content each call — the first
+// call's function-call tokens and the second call's final prose are both
+// real generation cost — so that part is correctly summed. Total is
+// recomputed from the corrected Prompt/Output rather than summed from
+// each call's own Total field, which would carry the same double-count.
 func (a *App) accumulateUsage(u *TokenUsage) {
 	if a.turnUsage == nil {
 		a.turnUsage = &TokenUsage{}
 	}
-	a.turnUsage.Prompt += u.Prompt
+	if u.Prompt > a.turnUsage.Prompt {
+		a.turnUsage.Prompt = u.Prompt
+	}
 	a.turnUsage.Output += u.Output
-	a.turnUsage.Total += u.Total
+	a.turnUsage.Total = a.turnUsage.Prompt + a.turnUsage.Output
 }
 
 // attachTurnUsage lands the turn's accumulated usage/finish-reason on the
