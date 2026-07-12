@@ -71,7 +71,14 @@ func renderMessage(s theme.Styles, m ChatMessage, width int, highlightUser bool)
 	case RoleAgent:
 		label := s.MessageAgent.Render("agent")
 		content := s.MessageContent.Width(width).Render(m.Content)
-		return lipgloss.JoinVertical(lipgloss.Left, label, content)
+		lines := []string{label, content}
+		if m.FinishReason != "" {
+			lines = append(lines, renderFinishReason(s, m.FinishReason))
+		}
+		if m.Usage != nil {
+			lines = append(lines, renderUsage(s, m.Usage))
+		}
+		return lipgloss.JoinVertical(lipgloss.Left, lines...)
 	case RoleTool:
 		return renderTool(s, m.ToolName, m.ToolArgs, m.ToolStatus, m.ToolPending, width)
 	default:
@@ -120,6 +127,58 @@ func renderTool(s theme.Styles, name string, args map[string]any, status string,
 		statusStyle = s.ToolConfirmDenied
 	}
 	return callLine + "\n" + s.ToolGutter.Render(toolGutter) + statusStyle.Render(status)
+}
+
+// renderUsage draws the quiet per-turn token-cost line under an agent
+// reply — a running total across every model call the turn made, not
+// just its last one. See App.attachTurnUsage.
+func renderUsage(s theme.Styles, u *TokenUsage) string {
+	return s.MessageMeta.Render(fmt.Sprintf("%d in · %d out · %d tokens", u.Prompt, u.Output, u.Total))
+}
+
+// renderFinishReason draws a note under an agent reply when the model's
+// last call in the turn ended on something other than a plain "stop" —
+// styled by severity: a red/bold line for the model actually
+// refusing/filtering (safety, recitation, prohibited content, ...) versus
+// a plain warning-colored line for a benign truncation.
+func renderFinishReason(s theme.Styles, reason string) string {
+	text, blocked := finishReasonText(reason)
+	if blocked {
+		return s.MessageFinishBlocked.Render(text)
+	}
+	return s.MessageFinishWarning.Render(text)
+}
+
+// finishReasonText maps a genai.FinishReason string (kept as a plain
+// string here, not the genai type, so this package never needs to import
+// genai) to what a user should be told, plus whether it represents the
+// model refusing/filtering the response (as opposed to just running out
+// of room to finish it).
+func finishReasonText(reason string) (text string, blocked bool) {
+	switch reason {
+	case "MAX_TOKENS":
+		return "response truncated — hit the model's max output length", false
+	case "SAFETY":
+		return "response blocked by safety filters", true
+	case "RECITATION":
+		return "response blocked — flagged as recitation", true
+	case "BLOCKLIST":
+		return "response blocked — matched a blocked term", true
+	case "PROHIBITED_CONTENT":
+		return "response blocked — prohibited content", true
+	case "SPII":
+		return "response blocked — sensitive personal information", true
+	case "MALFORMED_FUNCTION_CALL":
+		return "model produced a malformed tool call", true
+	case "UNEXPECTED_TOOL_CALL":
+		return "model attempted an unexpected tool call", true
+	case "IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT", "IMAGE_RECITATION":
+		return "generated image blocked", true
+	case "LANGUAGE":
+		return "response stopped — unsupported language", false
+	default:
+		return "response ended early (" + reason + ")", false
+	}
 }
 
 func formatKV(m map[string]any) string {

@@ -67,6 +67,14 @@ type App struct {
 	streamingMsgIndex int
 	toolMsgIndex      map[string]int // tool call ID -> index into messages; see upsertToolMessage
 
+	// turnUsage/turnFinishReason accumulate across every model call one
+	// logical turn makes — including across a HITL pause/resume, which
+	// closes and reopens the stream channel but is still the same turn —
+	// until attachTurnUsage lands them on the turn's final agent message.
+	// See dispatchToBackend (where these reset) and attachTurnUsage.
+	turnUsage        *TokenUsage
+	turnFinishReason string
+
 	viewport     viewport.Model
 	userMsgLines []int // line offset of each user message's block; see renderTranscript
 	input        textarea.Model
@@ -179,6 +187,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.streamChan = nil
 			a.status = theme.StatusIdle
 			a.dropEmptyStreamingPlaceholder()
+			// pendingConfirmation set means this channel close is a HITL
+			// pause, not the turn actually ending — resolveConfirmation
+			// reopens a fresh channel for the same turn, so the running
+			// totals need to survive until then rather than land now.
+			if a.pendingConfirmation == nil {
+				a.attachTurnUsage()
+			}
 			a.followTranscript()
 			return a, nil
 		}
@@ -199,6 +214,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.upsertToolMessage(msg.chunk.ToolCall.ID, msg.chunk.ToolCall.Name, msg.chunk.ToolCall.Args, toolStatusRunning, false)
 		case msg.chunk.ToolResult != nil:
 			a.upsertToolMessage(msg.chunk.ToolResult.ID, msg.chunk.ToolResult.Name, nil, summarizeResult(msg.chunk.ToolResult.Result), false)
+		case msg.chunk.Usage != nil:
+			a.accumulateUsage(msg.chunk.Usage)
+		case msg.chunk.FinishReason != "":
+			a.turnFinishReason = msg.chunk.FinishReason
 		default:
 			a.messages[a.streamingMsgIndex].Content += msg.chunk.Text
 		}
@@ -391,6 +410,7 @@ func (a *App) sendMessage(text string) tea.Cmd {
 // handler resuming a held message.
 func (a *App) dispatchToBackend(text string) tea.Cmd {
 	a.status = theme.StatusThinking
+	a.turnUsage, a.turnFinishReason = nil, ""
 	backend := a.backend
 
 	if !a.streamReplies {
@@ -438,6 +458,44 @@ func readStreamChunk(ch <-chan StreamChunk) tea.Cmd {
 	return func() tea.Msg {
 		chunk, ok := <-ch
 		return streamChunkMsg{chunk: chunk, ok: ok}
+	}
+}
+
+// accumulateUsage sums token counts into the running total for the turn
+// in progress — a turn can invoke the model more than once, so this adds
+// rather than overwrites. See turnUsage's doc comment.
+func (a *App) accumulateUsage(u *TokenUsage) {
+	if a.turnUsage == nil {
+		a.turnUsage = &TokenUsage{}
+	}
+	a.turnUsage.Prompt += u.Prompt
+	a.turnUsage.Output += u.Output
+	a.turnUsage.Total += u.Total
+}
+
+// attachTurnUsage lands the turn's accumulated usage/finish-reason on the
+// last RoleAgent message it produced, then clears the accumulator. Called
+// once the turn is genuinely over (see the streamChunkMsg !ok case) —
+// never mid-turn, since a tool call in progress would otherwise get an
+// intermediate model call's numbers attached to the wrong bubble.
+//
+// If the model's very last call in the turn produced no closing prose,
+// its placeholder was already dropped by dropEmptyStreamingPlaceholder by
+// the time this runs, leaving no RoleAgent message left to attach to —
+// rare, and not worth inventing a bubble just to hold a token count, so
+// it's silently skipped rather than attached somewhere misleading.
+func (a *App) attachTurnUsage() {
+	usage, reason := a.turnUsage, a.turnFinishReason
+	a.turnUsage, a.turnFinishReason = nil, ""
+	if usage == nil && reason == "" {
+		return
+	}
+	for i := len(a.messages) - 1; i >= 0; i-- {
+		if a.messages[i].Role == RoleAgent {
+			a.messages[i].Usage = usage
+			a.messages[i].FinishReason = reason
+			return
+		}
 	}
 }
 

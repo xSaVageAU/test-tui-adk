@@ -31,15 +31,29 @@ type Backend interface {
 	RespondToConfirmation(ctx context.Context, sessionID, requestID string, approved bool) (<-chan StreamChunk, error)
 }
 
-// StreamChunk is one increment of a streamed reply: exactly one of Text,
-// ToolCall, ToolResult, or Confirmation is set (never more than one) —
-// these aren't deltas the way Text is, each carries a whole event.
+// StreamChunk is one increment of a streamed reply: exactly one field is
+// set per chunk (never more than one) — ToolCall/ToolResult/Confirmation/
+// Usage/FinishReason aren't deltas the way Text is, each carries a whole
+// event. Usage and FinishReason can each arrive more than once per turn,
+// since a single turn may invoke the model more than once (e.g. once to
+// decide on a tool call, again after the result comes back) — the caller
+// is expected to accumulate/track-latest across a turn, not treat either
+// as a one-shot final value.
 type StreamChunk struct {
 	Text         string
 	ToolCall     *ToolCall
 	ToolResult   *ToolResult
 	Confirmation *ToolConfirmationRequest
+	Usage        *TokenUsage
+	FinishReason string // non-empty only for a notable non-"stop" reason
 	Err          error
+}
+
+// TokenUsage reports the token cost of one underlying model call.
+type TokenUsage struct {
+	Prompt int
+	Output int
+	Total  int
 }
 
 // ToolCall is the agent invoking a registered tool. ID ties it to the

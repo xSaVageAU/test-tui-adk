@@ -32,6 +32,13 @@ type ChatMessage struct {
 	ToolStatus  string // e.g. "running…", the pending-approval text, or a result summary
 	ToolPending bool   // true only while ToolStatus is an approval request awaiting a decision
 	At          time.Time
+
+	// Usage and FinishReason are meaningful only on RoleAgent messages —
+	// the turn's accumulated token cost and, if the model's last call
+	// ended on something other than a plain "stop", a note about why. See
+	// App.attachTurnUsage.
+	Usage        *TokenUsage
+	FinishReason string
 }
 
 // Agent is a switchable persona/session the platform can route messages to.

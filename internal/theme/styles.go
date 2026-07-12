@@ -25,7 +25,8 @@ type Styles struct {
 	// Chat viewport. MessageSystem is the plain, quiet variant (only used
 	// for the empty-state placeholder); MessageEvent is the badge shown
 	// for actual system events (agent switched, key set, errors, ...) —
-	// those want to stand out, not blend in.
+	// those want to stand out, not blend in. MessageMeta is the quiet
+	// per-turn token-usage line under an agent reply.
 	Viewport          lipgloss.Style
 	MessageUser       lipgloss.Style
 	MessageAgent      lipgloss.Style
@@ -34,6 +35,15 @@ type Styles struct {
 	MessageMeta       lipgloss.Style
 	MessageContent    lipgloss.Style
 	MessageUserBubble lipgloss.Style // highlighted backdrop variant for user messages
+
+	// MessageFinish* style the note shown under an agent reply that ended
+	// on a notable non-"stop" finish reason — Warning for a benign
+	// truncation (hit the model's max output length), Blocked for the
+	// model actually refusing/filtering the response (safety, recitation,
+	// prohibited content, ...). Quiet colored text, same weight as
+	// ToolConfirmApproved/Denied — informational, nothing to act on.
+	MessageFinishWarning lipgloss.Style
+	MessageFinishBlocked lipgloss.Style
 
 	// Tool activity renders as a colored left gutter bar (like a
 	// blockquote marker) with the call and its result grouped tight
@@ -180,6 +190,13 @@ func New(t Theme) Styles {
 		Background(t.Highlight).
 		Foreground(t.Text).
 		Padding(0, 1)
+
+	s.MessageFinishWarning = lipgloss.NewStyle().
+		Foreground(t.Warning)
+
+	s.MessageFinishBlocked = lipgloss.NewStyle().
+		Foreground(t.Error).
+		Bold(true)
 
 	s.ToolGutter = lipgloss.NewStyle().
 		Foreground(t.Warning)

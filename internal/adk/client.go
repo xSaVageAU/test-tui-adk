@@ -218,6 +218,31 @@ func (c *Client) runStream(ctx context.Context, sessionID string, msg *genai.Con
 				send(ui.StreamChunk{Err: fmt.Errorf("run: %w", err)})
 				return
 			}
+			// The aggregator's Close() result — see runStream's doc comment
+			// on the final aggregated event — is the one event per model
+			// call carrying real UsageMetadata/FinishReason; every partial
+			// chunk before it has Partial=true and, per streamingResponse-
+			// aggregator.aggregateResponse, only ever forwards whatever
+			// usage the raw provider chunk itself happened to carry (often
+			// nothing until the last one). !event.Partial isolates exactly
+			// that one event.
+			if !event.Partial {
+				if u := event.UsageMetadata; u != nil {
+					if !send(ui.StreamChunk{Usage: &ui.TokenUsage{
+						Prompt: int(u.PromptTokenCount),
+						Output: int(u.CandidatesTokenCount + u.ThoughtsTokenCount),
+						Total:  int(u.TotalTokenCount),
+					}}) {
+						return
+					}
+				}
+				if fr := event.FinishReason; fr != "" && fr != genai.FinishReasonStop && fr != genai.FinishReasonUnspecified {
+					if !send(ui.StreamChunk{FinishReason: string(fr)}) {
+						return
+					}
+				}
+			}
+
 			if event.Content == nil {
 				continue
 			}
