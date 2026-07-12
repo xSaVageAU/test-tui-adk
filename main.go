@@ -41,6 +41,7 @@ func main() {
 		BackendNote: note,
 		NewBackend:  newBackend,
 		ModelName:   adk.ModelName,
+		AgentName:   adk.AgentName,
 	})
 
 	// WithMouseCellMotion is what actually makes the terminal report wheel

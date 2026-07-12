@@ -41,24 +41,6 @@ type ChatMessage struct {
 	FinishReason string
 }
 
-// Agent is a switchable persona/session the platform can route messages to.
-// Mock data today; stand-in for whatever an "agent" ends up being backed by
-// (a model+system-prompt combo, a running process, etc).
-type Agent struct {
-	ID          string
-	Name        string
-	Description string
-}
-
-// mockAgents seeds the command palette until real agent data exists.
-func mockAgents() []Agent {
-	return []Agent{
-		{ID: "research", Name: "Research", Description: "Reads code and docs, answers questions"},
-		{ID: "coder", Name: "Coder", Description: "Writes and edits code"},
-		{ID: "planner", Name: "Planner", Description: "Breaks work into steps"},
-	}
-}
-
 // sessionID identifies this run's conversation to the backend (real or
 // mock) and doubles as the label shown in the top bar. Fixed for the
 // process lifetime — no persistence across restarts yet.

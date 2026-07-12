@@ -32,13 +32,37 @@ import (
 )
 
 const (
-	appName   = "tui-testing"
-	userID    = "local-user"
-	agentName = "assistant"
+	appName = "tui-testing"
+	userID  = "local-user"
 
-	instruction = "You are a concise, helpful assistant embedded in a terminal chat UI. " +
+	// AgentName is the root agent's name. session.Event.Author equals
+	// this until the model transfers to one of the specialists below —
+	// exported so callers (the boot banner's initial "agent" line, via
+	// ui.AppConfig.AgentName) can display it without duplicating the
+	// string.
+	AgentName = "assistant"
+
+	researchAgentName = "research"
+	coderAgentName    = "coder"
+	plannerAgentName  = "planner"
+
+	rootInstruction = "You are the front-line assistant embedded in a terminal chat UI test harness. " +
 		"Keep replies short — this is a test harness for the UI, not a place for long essays. " +
-		"You have a list_files tool for browsing the working directory; use it whenever it's relevant."
+		"You have a list_files tool for browsing the working directory; use it whenever it's relevant. " +
+		"You can transfer to three specialists when a request clearly fits their focus: research " +
+		"(reading code/docs, answering questions), coder (writing/editing code), and planner (breaking " +
+		"work into steps). Handle general requests yourself rather than transferring unnecessarily."
+
+	researchInstruction = "You are the research specialist in a terminal chat UI test harness: read code " +
+		"and docs, answer questions accurately and concisely. Use list_files to browse the working " +
+		"directory when relevant. Keep replies short."
+
+	coderInstruction = "You are the coding specialist in a terminal chat UI test harness: help write and " +
+		"edit code, explain snippets, suggest fixes. Use list_files to browse the working directory when " +
+		"relevant. Keep replies short."
+
+	plannerInstruction = "You are the planning specialist in a terminal chat UI test harness: break " +
+		"requests down into a clear, ordered list of steps. Keep replies short."
 )
 
 // ModelName is the Gemini model this package talks to. Exported so
@@ -46,14 +70,15 @@ const (
 // duplicating the string or reaching into adk's internals for it.
 const ModelName = "gemini-3.1-flash-lite"
 
-// Client is a single, minimal ADK agent — no tools, no sub-agents, no
-// persistence beyond the process lifetime. Just enough to prove the TUI
-// can round-trip a message through a real LLM.
+// Client is a single ADK agent tree — a root agent that can transfer to
+// three specialist sub-agents — with no persistence beyond the process
+// lifetime. Just enough to prove the TUI can round-trip a message,
+// including a real multi-agent handoff, through a real LLM.
 type Client struct {
 	runner *runner.Runner
 }
 
-// New builds the Gemini model, the ADK agent, and the runner backing it
+// New builds the Gemini model, the agent tree, and the runner backing it
 // from the given API key. Sourcing the key (env var at startup, a value
 // typed into the /key popup, ...) is entirely the caller's concern; this
 // just validates and uses whatever it's handed. Returns an error rather
@@ -76,19 +101,55 @@ func New(ctx context.Context, apiKey string) (*Client, error) {
 		// event instead of running listFiles, and either runs it or
 		// reports it declined once we answer via
 		// Client.RespondToConfirmation. listFiles itself needs no
-		// changes for this — see the HITL handling in runStream.
+		// changes for this — see the HITL handling in runStream. The
+		// same tool.Tool value is handed to every agent below that wants
+		// it; functiontool.New just builds a schema/handler pair, it's
+		// not agent-specific state.
 		RequireConfirmation: true,
 	}, listFiles)
 	if err != nil {
 		return nil, fmt.Errorf("create list_files tool: %w", err)
 	}
 
-	a, err := llmagent.New(llmagent.Config{
-		Name:        agentName,
+	research, err := llmagent.New(llmagent.Config{
+		Name:        researchAgentName,
+		Model:       model,
+		Description: "Reads code and docs, answers questions.",
+		Instruction: researchInstruction,
+		Tools:       []tool.Tool{listFilesTool},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create research agent: %w", err)
+	}
+
+	coder, err := llmagent.New(llmagent.Config{
+		Name:        coderAgentName,
+		Model:       model,
+		Description: "Writes and edits code.",
+		Instruction: coderInstruction,
+		Tools:       []tool.Tool{listFilesTool},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create coder agent: %w", err)
+	}
+
+	planner, err := llmagent.New(llmagent.Config{
+		Name:        plannerAgentName,
+		Model:       model,
+		Description: "Breaks work into steps.",
+		Instruction: plannerInstruction,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create planner agent: %w", err)
+	}
+
+	root, err := llmagent.New(llmagent.Config{
+		Name:        AgentName,
 		Model:       model,
 		Description: "A general-purpose assistant for testing the TUI against a real LLM.",
-		Instruction: instruction,
+		Instruction: rootInstruction,
 		Tools:       []tool.Tool{listFilesTool},
+		SubAgents:   []agent.Agent{research, coder, planner},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create agent: %w", err)
@@ -96,7 +157,7 @@ func New(ctx context.Context, apiKey string) (*Client, error) {
 
 	r, err := runner.New(runner.Config{
 		AppName:           appName,
-		Agent:             a,
+		Agent:             root,
 		SessionService:    session.InMemoryService(),
 		AutoCreateSession: true,
 	})
@@ -212,12 +273,31 @@ func (c *Client) runStream(ctx context.Context, sessionID string, msg *genai.Con
 		seenCalls := map[string]bool{}
 		seenResults := map[string]bool{}
 		seenConfirmations := map[string]bool{}
+		lastAuthor := ""
 
 		for event, err := range c.runner.Run(ctx, userID, sessionID, msg, cfg) {
 			if err != nil {
 				send(ui.StreamChunk{Err: fmt.Errorf("run: %w", err)})
 				return
 			}
+
+			// Author is set on every event to whichever agent is currently
+			// handling the conversation — the runner resolves real
+			// multi-agent transfer itself (findAgentToRun, unexported, walks
+			// session history by Author), sticking with whoever last spoke
+			// across turns too. Reporting a change here — deduped against
+			// the last author *this call* has seen, "user" excluded since
+			// that's the author on the event recording the message we just
+			// sent — lets the UI notice a transfer without knowing anything
+			// about ADK's agent tree; it just compares against whichever
+			// name it already has and no-ops if nothing changed.
+			if author := event.Author; author != "" && author != "user" && author != lastAuthor {
+				lastAuthor = author
+				if !send(ui.StreamChunk{AgentSwitch: &ui.AgentSwitch{Name: author}}) {
+					return
+				}
+			}
+
 			// The aggregator's Close() result — see runStream's doc comment
 			// on the final aggregated event — is the one event per model
 			// call carrying real UsageMetadata/FinishReason; every partial

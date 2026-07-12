@@ -49,13 +49,15 @@ type App struct {
 	width, height int
 	ready         bool
 
-	agents         []Agent
-	activeAgent    Agent
-	status         theme.StatusKind
-	messages       []ChatMessage
-	highlightUser  bool   // experimental: backdrop highlight behind user messages
-	streamReplies  bool   // token-by-token replies via Backend.Stream instead of Send
-	lastPromptText string // most recent user message; backs the sticky-prompt overlay in View()
+	// activeAgentName is whichever agent is currently handling the
+	// conversation — sourced entirely from real backend transfer events
+	// (see handleAgentSwitch), never user-selectable.
+	activeAgentName string
+	status          theme.StatusKind
+	messages        []ChatMessage
+	highlightUser   bool   // experimental: backdrop highlight behind user messages
+	streamReplies   bool   // token-by-token replies via Backend.Stream instead of Send
+	lastPromptText  string // most recent user message; backs the sticky-prompt overlay in View()
 
 	hitlMode            hitlMode // how a pending tool approval is presented — see hitl.go
 	pendingConfirmation *pendingConfirmation
@@ -108,6 +110,10 @@ type AppConfig struct {
 	NewBackend BackendFactory
 	// ModelName is shown in the boot banner. "" renders as "unknown".
 	ModelName string
+	// AgentName is the root agent's name — shown in the boot banner and
+	// as the header's initial "agent" value, until a real transfer event
+	// (see handleAgentSwitch) changes it. "" renders as "unknown".
+	AgentName string
 }
 
 // NewApp constructs the app with the default (first-registered) theme
@@ -115,7 +121,6 @@ type AppConfig struct {
 func NewApp(cfg AppConfig) *App {
 	mgr := theme.NewManager(theme.Defaults()...)
 	styles := mgr.Styles()
-	agents := mockAgents()
 
 	var messages []ChatMessage
 	if cfg.BackendNote != "" {
@@ -128,19 +133,18 @@ func NewApp(cfg AppConfig) *App {
 		backend:    cfg.Backend,
 		newBackend: cfg.NewBackend,
 		bootInfo: BootInfo{
-			Agent:     agents[0].Name,
+			Agent:     orPlaceholder(cfg.AgentName, "unknown"),
 			Model:     cfg.ModelName,
 			Connected: cfg.Backend != nil,
 		},
-		agents:        agents,
-		activeAgent:   agents[0],
-		status:        theme.StatusIdle,
-		highlightUser: true,
-		streamReplies: true,
-		inputLines:    minInputLines,
-		messages:      messages,
-		input:         newInput(styles),
-		help:          help.New(),
+		activeAgentName: cfg.AgentName,
+		status:          theme.StatusIdle,
+		highlightUser:   true,
+		streamReplies:   true,
+		inputLines:      minInputLines,
+		messages:        messages,
+		input:           newInput(styles),
+		help:            help.New(),
 	}
 	a.help.ShortSeparator = "  "
 	return a
@@ -204,6 +208,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		switch {
+		case msg.chunk.AgentSwitch != nil:
+			a.handleAgentSwitch(msg.chunk.AgentSwitch.Name)
 		case msg.chunk.Confirmation != nil:
 			// The run pauses itself right after this — nothing more will
 			// arrive on the channel until resolveConfirmation answers it,
@@ -499,6 +505,23 @@ func (a *App) attachTurnUsage() {
 	}
 }
 
+// handleAgentSwitch reacts to a real multi-agent transfer — the backend
+// reports whichever agent is currently authoring events, and this only
+// ever reflects that after the fact (see AgentSwitch's doc comment for
+// why there's no way to drive it from here). The backend reports the
+// active author on essentially every event, so most calls are a same-name
+// no-op; only an actual change interrupts the transcript.
+func (a *App) handleAgentSwitch(name string) {
+	if name == "" || name == a.activeAgentName {
+		return
+	}
+	a.activeAgentName = name
+	a.dropEmptyStreamingPlaceholder()
+	a.messages = append(a.messages, ChatMessage{Role: RoleSystem, Content: "→ transferred to " + name, At: time.Now()})
+	a.messages = append(a.messages, ChatMessage{Role: RoleAgent, Content: "", At: time.Now()})
+	a.streamingMsgIndex = len(a.messages) - 1
+}
+
 // upsertToolMessage tracks one tool invocation's entire lifecycle — call,
 // optional approval, eventual result — as a single transcript entry found
 // and updated by call ID rather than appended fresh each event. Without
@@ -695,7 +718,7 @@ func (a *App) View() string {
 		return ""
 	}
 
-	topBar := renderTopBar(a.styles, a.width, a.activeAgent.Name, a.status, sessionID)
+	topBar := renderTopBar(a.styles, a.width, a.activeAgentName, a.status, sessionID)
 	body := a.viewport.View()
 	if sticky := a.stickyPromptOverlay(); sticky != "" {
 		body = overlay(body, sticky, 0, 0, a.viewport.Width)

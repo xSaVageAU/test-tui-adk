@@ -17,17 +17,16 @@ type paletteKind int
 
 const (
 	paletteNone paletteKind = iota
-	paletteAgent
 	paletteTheme
 	paletteSettings
 	paletteKeyInput // not list-backed — see keyinput.go
 	paletteConfirm  // list-backed (Approve/Deny) but has its own key handler — see hitl.go
 )
 
-// paletteItem is a single row in any popup menu (agents, themes,
-// settings). id is what selection logic acts on; title/desc are display
-// only. One item type serves every menu kind so the list plumbing
-// (delegate, list.Model) doesn't need to be duplicated per menu.
+// paletteItem is a single row in any popup menu (themes, settings). id is
+// what selection logic acts on; title/desc are display only. One item
+// type serves every menu kind so the list plumbing (delegate, list.Model)
+// doesn't need to be duplicated per menu.
 type paletteItem struct {
 	id    string
 	title string

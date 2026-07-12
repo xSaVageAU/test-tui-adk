@@ -18,7 +18,6 @@ type commandSpec struct {
 }
 
 var commandSpecs = []commandSpec{
-	{Name: "agent", Desc: "Switch the active agent"},
 	{Name: "theme", Desc: "Change the color theme"},
 	{Name: "settings", Desc: "Adjust settings"},
 	{Name: "key", Desc: "Set your GOOGLE_API_KEY"},
@@ -69,8 +68,6 @@ func renderSuggestions(s theme.Styles, matches []commandSpec, selected, width in
 // rather than being silently sent as chat.
 func (a *App) runCommand(name string) {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "agent":
-		a.openAgentMenu()
 	case "theme":
 		a.openThemeMenu()
 	case "settings":
@@ -78,16 +75,8 @@ func (a *App) runCommand(name string) {
 	case "key":
 		a.openKeyInput()
 	default:
-		a.systemMessage("Unknown command: /" + name + " — try /agent, /theme, /settings, or /key.")
+		a.systemMessage("Unknown command: /" + name + " — try /theme, /settings, or /key.")
 	}
-}
-
-func (a *App) openAgentMenu() {
-	items := make([]paletteItem, len(a.agents))
-	for i, ag := range a.agents {
-		items[i] = paletteItem{id: ag.ID, title: ag.Name, desc: ag.Description}
-	}
-	a.openMenu(paletteAgent, "Switch agent", items)
 }
 
 func (a *App) openThemeMenu() {
@@ -159,8 +148,6 @@ func (a *App) cancelMenu() {
 // previewTheme) — confirming just makes it permanent instead of reverting.
 func (a *App) confirmMenuSelection(id string) {
 	switch a.paletteKind {
-	case paletteAgent:
-		a.selectAgent(id)
 	case paletteTheme:
 		a.systemMessage("Theme set to " + id + ".")
 	case paletteSettings:
@@ -175,16 +162,6 @@ func (a *App) confirmMenuSelection(id string) {
 func (a *App) previewTheme(name string) {
 	a.themeMgr.Set(name)
 	a.applyTheme()
-}
-
-func (a *App) selectAgent(id string) {
-	for _, ag := range a.agents {
-		if ag.ID == id {
-			a.activeAgent = ag
-			a.systemMessage("Switched to " + ag.Name + ".")
-			return
-		}
-	}
 }
 
 func (a *App) toggleSetting(id string) {

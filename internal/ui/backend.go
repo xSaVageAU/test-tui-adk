@@ -46,7 +46,16 @@ type StreamChunk struct {
 	Confirmation *ToolConfirmationRequest
 	Usage        *TokenUsage
 	FinishReason string // non-empty only for a notable non-"stop" reason
+	AgentSwitch  *AgentSwitch
 	Err          error
+}
+
+// AgentSwitch reports which agent is now handling the conversation.
+// Multi-agent transfer is decided entirely by the model — a backend only
+// ever reports the decision after the fact, never drives it; there's no
+// way to force a specific agent from outside.
+type AgentSwitch struct {
+	Name string
 }
 
 // TokenUsage reports the token cost of one underlying model call.
