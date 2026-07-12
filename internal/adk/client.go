@@ -21,11 +21,13 @@ import (
 
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/agent/llmagent"
+	"google.golang.org/adk/v2/memory"
 	"google.golang.org/adk/v2/model/gemini"
 	"google.golang.org/adk/v2/runner"
 	"google.golang.org/adk/v2/session"
 	"google.golang.org/adk/v2/tool"
 	"google.golang.org/adk/v2/tool/functiontool"
+	"google.golang.org/adk/v2/tool/preloadmemorytool"
 	"google.golang.org/adk/v2/tool/toolconfirmation"
 
 	"tui-testing/internal/ui"
@@ -71,11 +73,15 @@ const (
 const ModelName = "gemini-3.1-flash-lite"
 
 // Client is a single ADK agent tree — a root agent that can transfer to
-// three specialist sub-agents — with no persistence beyond the process
-// lifetime. Just enough to prove the TUI can round-trip a message,
-// including a real multi-agent handoff, through a real LLM.
+// three specialist sub-agents — backed by a sqlite-persisted session
+// store (conversation history survives a restart) and a sqlite-backed
+// memory store (facts the agent has picked up survive a restart too,
+// recalled across whatever session they're asked from — see memory.go
+// and store.go).
 type Client struct {
-	runner *runner.Runner
+	runner   *runner.Runner
+	sessions session.Service
+	mem      memory.Service
 }
 
 // New builds the Gemini model, the agent tree, and the runner backing it
@@ -91,6 +97,11 @@ func New(ctx context.Context, apiKey string) (*Client, error) {
 	model, err := gemini.NewModel(ctx, ModelName, &genai.ClientConfig{APIKey: apiKey})
 	if err != nil {
 		return nil, fmt.Errorf("create model: %w", err)
+	}
+
+	sessSvc, memSvc, err := openStores()
+	if err != nil {
+		return nil, fmt.Errorf("open persistent stores: %w", err)
 	}
 
 	listFilesTool, err := functiontool.New(functiontool.Config{
@@ -148,8 +159,15 @@ func New(ctx context.Context, apiKey string) (*Client, error) {
 		Model:       model,
 		Description: "A general-purpose assistant for testing the TUI against a real LLM.",
 		Instruction: rootInstruction,
-		Tools:       []tool.Tool{listFilesTool},
-		SubAgents:   []agent.Agent{research, coder, planner},
+		// preloadmemorytool runs automatically on every request and
+		// silently injects relevant past-conversation snippets into the
+		// system instructions — the model doesn't have to decide to look,
+		// it just already knows. Only on root for now: transfer hands the
+		// model seat to a sub-agent, and those don't carry this tool, so a
+		// specialist mid-conversation won't recall old sessions — fine for
+		// now since root is the primary surface, revisit if that's felt.
+		Tools:     []tool.Tool{listFilesTool, preloadmemorytool.New()},
+		SubAgents: []agent.Agent{research, coder, planner},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create agent: %w", err)
@@ -158,14 +176,15 @@ func New(ctx context.Context, apiKey string) (*Client, error) {
 	r, err := runner.New(runner.Config{
 		AppName:           appName,
 		Agent:             root,
-		SessionService:    session.InMemoryService(),
+		SessionService:    sessSvc,
+		MemoryService:     memSvc,
 		AutoCreateSession: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create runner: %w", err)
 	}
 
-	return &Client{runner: r}, nil
+	return &Client{runner: r, sessions: sessSvc, mem: memSvc}, nil
 }
 
 // Send sends a single user message in the given session and returns the
@@ -191,6 +210,14 @@ func (c *Client) Send(ctx context.Context, sessionID, message string) (string, e
 	if reply.Len() == 0 {
 		return "", fmt.Errorf("empty response from model")
 	}
+
+	// Best effort, same reasoning as runStream's equivalent call — a
+	// memory-indexing failure shouldn't turn an otherwise-successful reply
+	// into an error.
+	if sess, err := c.sessions.Get(ctx, &session.GetRequest{AppName: appName, UserID: userID, SessionID: sessionID}); err == nil {
+		_ = c.mem.AddSessionToMemory(ctx, sess.Session)
+	}
+
 	return reply.String(), nil
 }
 
@@ -381,6 +408,18 @@ func (c *Client) runStream(ctx context.Context, sessionID string, msg *genai.Con
 					}
 				}
 			}
+		}
+
+		// Re-index this session into memory now that the turn (or this
+		// pause-to-resume segment of one — a HITL confirmation closes and
+		// reopens the channel mid-turn, see the doc comment above) has
+		// finished. AddSessionToMemory replaces rather than appends (see
+		// memstore.go), so calling this more often than strictly needed
+		// just keeps the extraction current, never duplicates it. Best
+		// effort: a failure here shouldn't surface as an error on an
+		// otherwise-successful reply, so it's swallowed rather than sent.
+		if sess, err := c.sessions.Get(ctx, &session.GetRequest{AppName: appName, UserID: userID, SessionID: sessionID}); err == nil {
+			_ = c.mem.AddSessionToMemory(ctx, sess.Session)
 		}
 	}()
 
