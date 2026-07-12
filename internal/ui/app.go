@@ -41,6 +41,12 @@ type App struct {
 	newBackend BackendFactory // builds a Backend from a key typed into /key; nil disables /key
 	bootInfo   BootInfo       // frozen at construction; see bootart.go
 
+	// sessionID identifies this run's conversation to the backend — a
+	// fresh one generated per launch (see newSessionID), so restarting
+	// starts a new conversation rather than resuming the last one now
+	// that sessions persist across restarts.
+	sessionID string
+
 	// pendingMessage holds a message sent with no backend connected,
 	// until /key (auto-opened for exactly this) resolves it — see
 	// sendMessage and the keySetMsg handler in Update.
@@ -132,6 +138,7 @@ func NewApp(cfg AppConfig) *App {
 		styles:     styles,
 		backend:    cfg.Backend,
 		newBackend: cfg.NewBackend,
+		sessionID:  newSessionID(),
 		bootInfo: BootInfo{
 			Agent:     orPlaceholder(cfg.AgentName, "unknown"),
 			Model:     cfg.ModelName,
@@ -421,7 +428,7 @@ func (a *App) dispatchToBackend(text string) tea.Cmd {
 
 	if !a.streamReplies {
 		return func() tea.Msg {
-			reply, err := backend.Send(context.Background(), sessionID, text)
+			reply, err := backend.Send(context.Background(), a.sessionID, text)
 			if err != nil {
 				return agentReplyMsg{err: err}
 			}
@@ -430,7 +437,7 @@ func (a *App) dispatchToBackend(text string) tea.Cmd {
 	}
 
 	return func() tea.Msg {
-		ch, err := backend.Stream(context.Background(), sessionID, text)
+		ch, err := backend.Stream(context.Background(), a.sessionID, text)
 		if err != nil {
 			return agentReplyMsg{err: err}
 		}
@@ -738,7 +745,7 @@ func (a *App) View() string {
 		return ""
 	}
 
-	topBar := renderTopBar(a.styles, a.width, a.activeAgentName, a.status, sessionID)
+	topBar := renderTopBar(a.styles, a.width, a.activeAgentName, a.status, a.sessionID)
 	body := a.viewport.View()
 	if sticky := a.stickyPromptOverlay(); sticky != "" {
 		body = overlay(body, sticky, 0, 0, a.viewport.Width)

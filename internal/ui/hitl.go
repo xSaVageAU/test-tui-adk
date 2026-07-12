@@ -168,7 +168,7 @@ func (a *App) resolveConfirmation(approved bool) tea.Cmd {
 
 	backend := a.backend
 	return func() tea.Msg {
-		ch, err := backend.RespondToConfirmation(context.Background(), sessionID, pc.id, approved)
+		ch, err := backend.RespondToConfirmation(context.Background(), a.sessionID, pc.id, approved)
 		if err != nil {
 			return agentReplyMsg{err: err}
 		}

@@ -1,6 +1,10 @@
 package ui
 
-import "time"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 // Role identifies who authored a ChatMessage.
 type Role int
@@ -41,7 +45,13 @@ type ChatMessage struct {
 	FinishReason string
 }
 
-// sessionID identifies this run's conversation to the backend (real or
-// mock) and doubles as the label shown in the top bar. Fixed for the
-// process lifetime — no persistence across restarts yet.
-const sessionID = "sess_7f3d2a19"
+// newSessionID generates a fresh conversation identifier for App to use
+// as App.sessionID — called once per launch (see NewApp), so every run
+// starts its own conversation rather than silently resuming whatever was
+// last talked to, now that sessions persist across restarts (see
+// internal/adk's sqlite-backed session store). google/uuid is already
+// pulled in as an ADK transitive dependency (its own platform/uuid.go id
+// provider), so this doesn't add anything new to the binary.
+func newSessionID() string {
+	return uuid.NewString()
+}
