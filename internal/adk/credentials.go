@@ -8,22 +8,23 @@ import (
 	"tui-testing/internal/appdir"
 )
 
-// providerGoogle identifies Gemini in the persisted credentials file —
+// providerGemini identifies Gemini in the persisted credentials file
+// (and in settings.json / a sub-agent's agent.json — see models.go) —
 // the only provider today, but keying by name from the start means
 // adding OpenRouter/LM Studio/Ollama later is a new map entry, not a
 // file-format migration.
-const providerGoogle = "google"
+const providerGemini = "gemini"
 
 // credentialsFile is provider name -> arbitrary string fields, kept
 // loose rather than a fixed per-provider struct: an API key is all
-// Google needs, but a future local provider like Ollama would want a
+// Gemini needs, but a future local provider like Ollama would want a
 // baseUrl instead of (or alongside) a key, and that shape isn't settled
 // yet for providers this app doesn't support.
 type credentialsFile struct {
 	Providers map[string]map[string]string `json:"providers"`
 }
 
-// SaveAPIKey persists apiKey as the Google provider's credential in
+// SaveAPIKey persists apiKey as the Gemini provider's credential in
 // appdir's credentials.json, creating or updating the file. Called only
 // after a key has been proven to work (New succeeded with it) — see
 // main.go's newBackend — so a typo'd key never ends up on disk.
@@ -40,10 +41,10 @@ func SaveAPIKey(apiKey string) error {
 	if cf.Providers == nil {
 		cf.Providers = map[string]map[string]string{}
 	}
-	if cf.Providers[providerGoogle] == nil {
-		cf.Providers[providerGoogle] = map[string]string{}
+	if cf.Providers[providerGemini] == nil {
+		cf.Providers[providerGemini] = map[string]string{}
 	}
-	cf.Providers[providerGoogle]["apiKey"] = apiKey
+	cf.Providers[providerGemini]["apiKey"] = apiKey
 
 	data, err := json.MarshalIndent(cf, "", "  ")
 	if err != nil {
@@ -58,7 +59,7 @@ func SaveAPIKey(apiKey string) error {
 	return nil
 }
 
-// LoadAPIKey returns the persisted Google provider API key, or "" if
+// LoadAPIKey returns the persisted Gemini provider API key, or "" if
 // none has been saved yet — a fresh install (or one where /key has
 // never been used) has no credentials file at all, which is not an
 // error condition here.
@@ -71,7 +72,7 @@ func LoadAPIKey() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return cf.Providers[providerGoogle]["apiKey"], nil
+	return cf.Providers[providerGemini]["apiKey"], nil
 }
 
 func readCredentialsFile(path string) (credentialsFile, error) {

@@ -1,6 +1,7 @@
 package adk
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -22,14 +23,21 @@ const (
 
 // subAgentConfig is one specialist's definition as discovered on disk:
 // one subdirectory per agent under appdir's "subagents" directory,
-// named for it, holding an agent.json (Name/Description/Tools) and an
-// instruction.md (the agent's instruction, as plain text/markdown).
-// Instruction is kept in its own file rather than a JSON string field so
-// it can be written and diffed as prose, not escaped inside quotes.
+// named for it, holding an agent.json (Name/Description/Tools/
+// Provider/Model) and an instruction.md (the agent's instruction, as
+// plain text/markdown). Instruction is kept in its own file rather than
+// a JSON string field so it can be written and diffed as prose, not
+// escaped inside quotes.
 type subAgentConfig struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
 	Tools       []string `json:"tools,omitempty"`
+	// Provider/Model override what this specialist runs on — see
+	// models.go's buildModel. Both empty (the common case) means "use
+	// whatever the root agent is configured to use," resolved by
+	// buildSubAgents rather than duplicated here.
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
 
 	instruction string // from instruction.md, not agent.json — see loadSubAgentConfigs
 }
@@ -108,8 +116,14 @@ func loadSubAgentConfigs() ([]subAgentConfig, error) {
 // buildSubAgents turns loaded configs into real ADK agents, resolving
 // each config's Tools names against toolRegistry — every tool a
 // sub-agent can be given must be registered there by the caller first
-// (see agents.go's buildRootAgent).
-func buildSubAgents(m model.LLM, toolRegistry map[string]tool.Tool, configs []subAgentConfig) ([]agent.Agent, error) {
+// (see agents.go's buildRootAgent). A config with no Provider/Model of
+// its own reuses rootModel verbatim (no need to build an identical
+// model twice); one that specifies either resolves its own via
+// buildModel, using the same apiKey the root agent was built with —
+// there's only ever one provider's key available today (see
+// credentials.go), so this only actually matters once a config asks for
+// a provider other than Gemini, which buildModel rejects outright.
+func buildSubAgents(ctx context.Context, apiKey string, rootModel model.LLM, toolRegistry map[string]tool.Tool, configs []subAgentConfig) ([]agent.Agent, error) {
 	agents := make([]agent.Agent, 0, len(configs))
 	for _, cfg := range configs {
 		tools := make([]tool.Tool, 0, len(cfg.Tools))
@@ -119,6 +133,15 @@ func buildSubAgents(m model.LLM, toolRegistry map[string]tool.Tool, configs []su
 				return nil, fmt.Errorf("sub-agent %q: unknown tool %q", cfg.Name, name)
 			}
 			tools = append(tools, t)
+		}
+
+		m := rootModel
+		if cfg.Provider != "" || cfg.Model != "" {
+			var err error
+			m, err = buildModel(ctx, cfg.Provider, cfg.Model, apiKey)
+			if err != nil {
+				return nil, fmt.Errorf("sub-agent %q: %w", cfg.Name, err)
+			}
 		}
 
 		a, err := llmagent.New(llmagent.Config{

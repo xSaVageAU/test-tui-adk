@@ -1,6 +1,7 @@
 package adk
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -55,11 +56,16 @@ const (
 // agent capable of touching file contents at all until a user
 // deliberately configures one that can.
 //
+// rootModel is what New already resolved for the root from settings.json's
+// agent section; ctx and apiKey are threaded through so a sub-agent whose
+// own agent.json specifies a different provider/model can resolve its
+// own model instead of inheriting rootModel — see buildSubAgents.
+//
 // Also returns the discovered specialists' names, in load order —
 // New uses this to populate Client.Specialists so callers (the boot
 // banner, via ui.AppConfig) can show what's actually loaded without
 // needing to know anything about how agents are built.
-func buildRootAgent(m model.LLM) (agent.Agent, []string, error) {
+func buildRootAgent(ctx context.Context, apiKey string, rootModel model.LLM) (agent.Agent, []string, error) {
 	listFilesTool, err := newListFilesTool()
 	if err != nil {
 		return nil, nil, fmt.Errorf("create list_files tool: %w", err)
@@ -83,7 +89,7 @@ func buildRootAgent(m model.LLM) (agent.Agent, []string, error) {
 		return nil, nil, fmt.Errorf("load sub-agent configs: %w", err)
 	}
 
-	subAgents, err := buildSubAgents(m, toolRegistry, configs)
+	subAgents, err := buildSubAgents(ctx, apiKey, rootModel, toolRegistry, configs)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -98,7 +104,7 @@ func buildRootAgent(m model.LLM) (agent.Agent, []string, error) {
 
 	root, err := llmagent.New(llmagent.Config{
 		Name:        AgentName,
-		Model:       m,
+		Model:       rootModel,
 		Description: "A general-purpose assistant for testing the TUI against a real LLM.",
 		Instruction: rootInstructionFor(subAgents),
 		Tools:       tools,

@@ -25,11 +25,11 @@ import (
 	"google.golang.org/genai"
 
 	"google.golang.org/adk/v2/agent"
-	"google.golang.org/adk/v2/model/gemini"
 	"google.golang.org/adk/v2/runner"
 	"google.golang.org/adk/v2/session"
 	"google.golang.org/adk/v2/tool/toolconfirmation"
 
+	"tui-testing/internal/settings"
 	"tui-testing/internal/ui"
 )
 
@@ -38,21 +38,16 @@ const (
 	userID  = "local-user"
 )
 
-// ModelName is the Gemini model this package talks to. Exported so
-// callers (e.g. the boot banner) can display it without either
-// duplicating the string or reaching into adk's internals for it.
-const ModelName = "gemini-3.1-flash-lite"
-
-// Client is a single ADK agent — a root agent with three specialists
-// available as agent-as-tool calls (research, coder, planner), never as
-// transfer targets, so there's exactly one voice in the conversation no
-// matter what the root ends up consulting — backed by a sqlite-persisted
-// session store (conversation history survives a restart; see store.go).
-// No long-term memory: an earlier pass wired one up via ADK's
-// memory.Service, but it turned out to just be keyword search over raw
-// stored transcript, not anything resembling durable remembered facts —
-// pulled back out rather than keep something that didn't match what was
-// actually wanted. Revisit later as a deliberate, from-scratch feature.
+// Client is a single ADK agent — a root agent with specialists available
+// as agent-as-tool calls, never as transfer targets, so there's exactly
+// one voice in the conversation no matter what the root ends up
+// consulting — backed by a sqlite-persisted session store (conversation
+// history survives a restart; see store.go). No long-term memory: an
+// earlier pass wired one up via ADK's memory.Service, but it turned out
+// to just be keyword search over raw stored transcript, not anything
+// resembling durable remembered facts — pulled back out rather than
+// keep something that didn't match what was actually wanted. Revisit
+// later as a deliberate, from-scratch feature.
 type Client struct {
 	runner   *runner.Runner
 	sessions session.Service
@@ -62,22 +57,35 @@ type Client struct {
 	// Specialists so callers (the boot banner) can show what's actually
 	// loaded without reaching into agent-building internals.
 	specialists []string
+
+	// modelName is the root agent's resolved model name — whatever
+	// settings.json's agent.model says, or DefaultModelName if it
+	// doesn't specify one. Exposed via ModelName for the boot banner,
+	// same reasoning as specialists.
+	modelName string
 }
 
-// New builds the Gemini model, the agent tree (see agents.go), and the
-// runner backing it, from the given API key. Sourcing the key (env var
-// at startup, a value typed into the /key popup, ...) is entirely the
-// caller's concern; this just validates and uses whatever it's handed.
-// Returns an error rather than panicking so the caller can decide how to
-// degrade.
+// New builds the root agent's model (provider/model chosen by
+// settings.json's agent section — see models.go), the agent tree (see
+// agents.go), and the runner backing it, from the given API key.
+// Sourcing the key (env var at startup, a value typed into the /key
+// popup, ...) is entirely the caller's concern; this just validates and
+// uses whatever it's handed. Returns an error rather than panicking so
+// the caller can decide how to degrade.
 func New(ctx context.Context, apiKey string) (*Client, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("no API key given")
 	}
 
-	model, err := gemini.NewModel(ctx, ModelName, &genai.ClientConfig{APIKey: apiKey})
+	cfg := settings.Load()
+
+	rootModel, err := buildModel(ctx, cfg.Agent.Provider, cfg.Agent.Model, apiKey)
 	if err != nil {
-		return nil, fmt.Errorf("create model: %w", err)
+		return nil, fmt.Errorf("create root model: %w", err)
+	}
+	modelName := cfg.Agent.Model
+	if modelName == "" {
+		modelName = DefaultModelName
 	}
 
 	sessSvc, err := openSessionStore()
@@ -85,7 +93,7 @@ func New(ctx context.Context, apiKey string) (*Client, error) {
 		return nil, fmt.Errorf("open session store: %w", err)
 	}
 
-	root, specialists, err := buildRootAgent(model)
+	root, specialists, err := buildRootAgent(ctx, apiKey, rootModel)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +108,7 @@ func New(ctx context.Context, apiKey string) (*Client, error) {
 		return nil, fmt.Errorf("create runner: %w", err)
 	}
 
-	return &Client{runner: r, sessions: sessSvc, specialists: specialists}, nil
+	return &Client{runner: r, sessions: sessSvc, specialists: specialists, modelName: modelName}, nil
 }
 
 // Specialists returns the name of every sub-agent that was discovered
@@ -108,6 +116,11 @@ func New(ctx context.Context, apiKey string) (*Client, error) {
 // under ~/.tui-testing/subagents.
 func (c *Client) Specialists() []string {
 	return c.specialists
+}
+
+// ModelName returns the root agent's resolved model name.
+func (c *Client) ModelName() string {
+	return c.modelName
 }
 
 // Send sends a single user message in the given session and returns the

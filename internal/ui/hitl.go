@@ -36,6 +36,17 @@ func (m hitlMode) next() hitlMode {
 	return (m + 1) % 2
 }
 
+// parseHITLMode is String's inverse, used when restoring hitlMode from
+// settings.json — anything other than exactly "inline" (including "",
+// an old/malformed file, or a future value this build doesn't know
+// about) falls back to the modal default rather than erroring.
+func parseHITLMode(s string) hitlMode {
+	if s == "inline" {
+		return hitlInline
+	}
+	return hitlModal
+}
+
 // The exact strings a RoleTool message's ToolStatus holds while a
 // confirmation is in play. Centralized here (rather than let chat.go
 // infer state from arbitrary text) so renderTool's color switch and the

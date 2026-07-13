@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"tui-testing/internal/settings"
 	"tui-testing/internal/theme"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -186,7 +187,24 @@ func (a *App) toggleSetting(id string) {
 	case "hitl":
 		a.hitlMode = a.hitlMode.next()
 	}
+	a.persistSettings()
 	a.refreshTranscript()
+}
+
+// persistSettings writes the current UI toggles to settings.json,
+// preserving whatever Agent section is already there — that one's
+// hand-edited by the user (see internal/settings), never touched by
+// this app. Best-effort, same reasoning as SaveAPIKey in internal/adk:
+// there's nowhere safe to report a write failure from inside the TUI,
+// and the worst case is just that a toggle doesn't survive a restart.
+func (a *App) persistSettings() {
+	s := settings.Load()
+	s.UI = settings.UISettings{
+		HighlightUser: a.highlightUser,
+		StreamReplies: a.streamReplies,
+		HITLMode:      a.hitlMode.String(),
+	}
+	_ = settings.Save(s)
 }
 
 func (a *App) systemMessage(text string) {

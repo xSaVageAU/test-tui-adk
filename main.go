@@ -41,6 +41,7 @@ func main() {
 	var backend ui.Backend
 	var note string
 	var specialists []string
+	var modelName string
 
 	// The environment variable always wins if set; otherwise fall back to
 	// whatever /key last saved (see newBackend). Startup itself never
@@ -57,6 +58,7 @@ func main() {
 	case err == nil:
 		backend = client
 		specialists = client.Specialists()
+		modelName = client.ModelName()
 	case apiKey != "":
 		// A key was present but didn't work — worth surfacing, unlike the
 		// no-key case below, which the /key popup now explains itself the
@@ -68,7 +70,7 @@ func main() {
 		Backend:     backend,
 		BackendNote: note,
 		NewBackend:  newBackend,
-		ModelName:   adk.ModelName,
+		ModelName:   modelName,
 		AgentName:   adk.AgentName,
 		Specialists: specialists,
 	})

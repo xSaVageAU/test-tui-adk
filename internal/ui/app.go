@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"tui-testing/internal/settings"
 	"tui-testing/internal/theme"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -133,6 +134,7 @@ type AppConfig struct {
 func NewApp(cfg AppConfig) *App {
 	mgr := theme.NewManager(theme.Load()...)
 	styles := mgr.Styles()
+	uiSettings := settings.Load().UI
 
 	var messages []ChatMessage
 	if cfg.BackendNote != "" {
@@ -152,8 +154,9 @@ func NewApp(cfg AppConfig) *App {
 		},
 		agentName:     cfg.AgentName,
 		status:        theme.StatusIdle,
-		highlightUser: true,
-		streamReplies: true,
+		highlightUser: uiSettings.HighlightUser,
+		streamReplies: uiSettings.StreamReplies,
+		hitlMode:      parseHITLMode(uiSettings.HITLMode),
 		inputLines:    minInputLines,
 		messages:      messages,
 		input:         newInput(styles),
