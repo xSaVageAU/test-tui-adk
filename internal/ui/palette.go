@@ -42,8 +42,13 @@ type paletteDelegate struct {
 	styles theme.Styles
 }
 
-func (d paletteDelegate) Height() int                             { return 2 }
-func (d paletteDelegate) Spacing() int                            { return 1 }
+// One row per item, no gap between rows — was 2 rows + 1 blank spacer
+// (3 rows/item), which meant a 12-row-capped popup only fit ~3 items
+// before needing to scroll. Title and desc share the row (same pattern
+// as the inline "/command" suggestion dropdown in commands.go) instead
+// of stacking on separate lines.
+func (d paletteDelegate) Height() int                             { return 1 }
+func (d paletteDelegate) Spacing() int                            { return 0 }
 func (d paletteDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
 
 func (d paletteDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
@@ -52,18 +57,19 @@ func (d paletteDelegate) Render(w io.Writer, m list.Model, index int, listItem l
 		return
 	}
 
-	// .Width() forces each line to fill the row, not just the glyphs —
-	// otherwise the row's backdrop color only shows behind the text and
-	// the rest of the line falls back to the terminal's raw default.
+	// .Width() forces the row to fill its full width, not just the
+	// glyphs — otherwise the row's backdrop color only shows behind the
+	// text and the rest of the line falls back to the terminal's raw
+	// default.
 	width := m.Width()
 
+	titleStyle, descStyle := d.styles.PaletteItem, d.styles.PaletteDesc
 	if index == m.Index() {
-		fmt.Fprintln(w, d.styles.PaletteSelected.Width(width).Render(" "+item.title+" "))
-		fmt.Fprint(w, d.styles.PaletteSelectedDesc.Width(width).Render("  "+item.desc))
-		return
+		titleStyle, descStyle = d.styles.PaletteSelected, d.styles.PaletteSelectedDesc
 	}
-	fmt.Fprintln(w, d.styles.PaletteItem.Width(width).Render(" "+item.title))
-	fmt.Fprint(w, d.styles.PaletteDesc.Width(width).Render("  "+item.desc))
+
+	left := titleStyle.Render(" " + item.title)
+	fmt.Fprint(w, left+descStyle.Width(max(width-lipgloss.Width(left), 0)).Render("  "+item.desc))
 }
 
 // paletteTitleHeight is how many rows renderPaletteTitle's output takes
