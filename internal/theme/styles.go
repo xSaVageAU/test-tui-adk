@@ -71,13 +71,13 @@ type Styles struct {
 	// Boot banner: a bordered panel printed once as the transcript's first
 	// entry. Every text style here carries Background(Surface) — same
 	// reason as the popup rows above, since this shares that panel look.
-	BootBorder   lipgloss.Style
-	BootTitle    lipgloss.Style
-	BootTagline  lipgloss.Style
-	BootLabel    lipgloss.Style
-	BootValue    lipgloss.Style
-	BootValueOK  lipgloss.Style
-	BootValueErr lipgloss.Style
+	// BootRule is the thin divider between the tagline and the info rows.
+	BootBorder  lipgloss.Style
+	BootTitle   lipgloss.Style
+	BootTagline lipgloss.Style
+	BootRule    lipgloss.Style
+	BootLabel   lipgloss.Style
+	BootValue   lipgloss.Style
 
 	// Input bar
 	InputBar        lipgloss.Style
@@ -242,22 +242,16 @@ func New(t Theme) Styles {
 		Foreground(t.TextMuted).
 		Background(t.Surface)
 
+	s.BootRule = lipgloss.NewStyle().
+		Foreground(t.Border).
+		Background(t.Surface)
+
 	s.BootLabel = lipgloss.NewStyle().
 		Foreground(t.TextFaint).
 		Background(t.Surface)
 
 	s.BootValue = lipgloss.NewStyle().
 		Foreground(t.Text).
-		Background(t.Surface).
-		Bold(true)
-
-	s.BootValueOK = lipgloss.NewStyle().
-		Foreground(t.Success).
-		Background(t.Surface).
-		Bold(true)
-
-	s.BootValueErr = lipgloss.NewStyle().
-		Foreground(t.Error).
 		Background(t.Surface).
 		Bold(true)
 

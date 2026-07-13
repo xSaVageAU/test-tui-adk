@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 
 	"tui-testing/internal/theme"
 
@@ -15,18 +16,22 @@ const bootMaxWidth = 60
 // BootInfo is the snapshot of startup conditions shown once in the boot
 // banner. Frozen at NewApp time and never updated afterward — this is a
 // splash screen, a record of what things looked like at launch, not a
-// live status widget (that's what the top bar is for).
+// live status widget (that's what the top bar is for). There's no Agent
+// field: with agent-as-tool as the only delegation pattern, there's
+// exactly one voice in every conversation, so naming it here would just
+// be trivia, not information — the header already shows it once, which
+// is enough.
 type BootInfo struct {
-	Agent     string
-	Model     string // "" if unknown
-	Connected bool
+	Model       string // "" if unknown
+	Theme       string
+	Specialists []string // sub-agents discovered at startup; nil/empty if none
 }
 
 // renderBootArt draws the boot banner: a bordered panel with a title,
-// a one-line project blurb, and a small agent/model/status table. Every
-// line inside is forced to the same content width so the panel's
-// background fills edge to edge — see the popup title saga elsewhere in
-// this package for why that matters.
+// a one-line project blurb, and a small info table. Every line inside is
+// forced to the same content width so the panel's background fills edge
+// to edge — see the popup title saga elsewhere in this package for why
+// that matters.
 func renderBootArt(s theme.Styles, info BootInfo, width int) string {
 	// Capped at bootMaxWidth on a roomy terminal, but never floored above
 	// what's actually available — a floor here would make the box wider
@@ -37,15 +42,16 @@ func renderBootArt(s theme.Styles, info BootInfo, width int) string {
 	title := s.BootTitle.Width(contentWidth).Render("◆ agent-platform")
 	tagline := s.BootTagline.Width(contentWidth).
 		Render("A terminal shell for talking to AI agents — built with Bubble Tea, Lip Gloss, and Google's ADK.")
+	rule := s.BootRule.Width(contentWidth).Render(strings.Repeat("─", contentWidth))
 
 	rows := []string{
-		bootRow(s, "agent", s.BootValue, info.Agent, contentWidth),
 		bootRow(s, "model", s.BootValue, orPlaceholder(info.Model, "unknown"), contentWidth),
-		bootStatusRow(s, info.Connected, contentWidth),
+		bootRow(s, "theme", s.BootValue, orPlaceholder(info.Theme, "unknown"), contentWidth),
+		bootSpecialistsRow(s, info.Specialists, contentWidth),
 	}
 
 	content := lipgloss.JoinVertical(lipgloss.Left,
-		title, "", tagline, "", lipgloss.JoinVertical(lipgloss.Left, rows...))
+		title, "", tagline, "", rule, "", lipgloss.JoinVertical(lipgloss.Left, rows...))
 
 	box := s.BootBorder.Render(content)
 	// Centered rather than flush left — it's meant to read as a one-time
@@ -58,17 +64,18 @@ func renderBootArt(s theme.Styles, info BootInfo, width int) string {
 // width and the value stretched to fill the rest — same technique used
 // for the /command suggestion rows.
 func bootRow(s theme.Styles, label string, valueStyle lipgloss.Style, value string, width int) string {
-	left := s.BootLabel.Render(fmt.Sprintf("%-8s", label))
+	left := s.BootLabel.Render(fmt.Sprintf("%-13s", label))
 	right := valueStyle.Width(max(width-lipgloss.Width(left), 0)).Render(value)
 	return left + right
 }
 
-func bootStatusRow(s theme.Styles, connected bool, width int) string {
-	style, text := s.BootValueErr, "not connected — try /key"
-	if connected {
-		style, text = s.BootValueOK, "connected"
+func bootSpecialistsRow(s theme.Styles, names []string, width int) string {
+	value := "none — see ~/.tui-testing/subagents"
+	style := s.BootValue
+	if len(names) > 0 {
+		value = strings.Join(names, ", ")
 	}
-	return bootRow(s, "status", style, text, width)
+	return bootRow(s, "specialists", style, value, width)
 }
 
 func orPlaceholder(s, placeholder string) string {

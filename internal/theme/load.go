@@ -25,7 +25,7 @@ var defaultsFS embed.FS
 // isn't the order this app wants — Mono first, since it's the theme
 // active on a fresh launch (see Manager.NewManager, which always starts
 // on index 0).
-var defaultThemeOrder = []string{"mono", "vibrant", "nord", "dracula", "gruvbox", "tokyonight", "catppuccin"}
+var defaultThemeOrder = []string{"mono", "vibrant", "nord", "dracula", "gruvbox", "tokyonight"}
 
 // Load returns every available theme: the built-ins embedded in the
 // binary, in defaultThemeOrder, followed by any custom themes found in

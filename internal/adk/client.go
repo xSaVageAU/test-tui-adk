@@ -56,6 +56,12 @@ const ModelName = "gemini-3.1-flash-lite"
 type Client struct {
 	runner   *runner.Runner
 	sessions session.Service
+
+	// specialists is the name of every sub-agent discovered at startup
+	// (see agents.go's buildRootAgent), in load order. Exposed via
+	// Specialists so callers (the boot banner) can show what's actually
+	// loaded without reaching into agent-building internals.
+	specialists []string
 }
 
 // New builds the Gemini model, the agent tree (see agents.go), and the
@@ -84,7 +90,7 @@ func New(ctx context.Context, apiKey string) (*Client, error) {
 		return nil, fmt.Errorf("create list_files tool: %w", err)
 	}
 
-	root, err := buildRootAgent(model, listFilesTool)
+	root, specialists, err := buildRootAgent(model, listFilesTool)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +105,14 @@ func New(ctx context.Context, apiKey string) (*Client, error) {
 		return nil, fmt.Errorf("create runner: %w", err)
 	}
 
-	return &Client{runner: r, sessions: sessSvc}, nil
+	return &Client{runner: r, sessions: sessSvc, specialists: specialists}, nil
+}
+
+// Specialists returns the name of every sub-agent that was discovered
+// and loaded at startup, in load order — empty if none were configured
+// under ~/.tui-testing/subagents.
+func (c *Client) Specialists() []string {
+	return c.specialists
 }
 
 // Send sends a single user message in the given session and returns the

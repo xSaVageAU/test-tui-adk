@@ -17,9 +17,9 @@ const (
 	// consulted via agent-as-tool (agenttool.New), not transfer
 	// (agent.Config.SubAgents) — the root calls them like a function and
 	// stays in control, rather than handing the conversation off to a
-	// different visible identity. Exported so callers (the boot banner's
-	// initial "agent" line, via ui.AppConfig.AgentName) can display it
-	// without duplicating the string.
+	// different visible identity. Exported so callers (the header, via
+	// ui.AppConfig.AgentName) can display it without duplicating the
+	// string.
 	AgentName = "assistant"
 
 	// rootInstructionBase is the root agent's instruction — the only
@@ -48,22 +48,29 @@ const (
 // conversation to it — see AgentName's doc comment for why.
 // listFilesTool is shared verbatim across every agent that wants it and
 // is the only tool a sub-agent config can currently reference by name.
-func buildRootAgent(m model.LLM, listFilesTool tool.Tool) (agent.Agent, error) {
+//
+// Also returns the discovered specialists' names, in load order —
+// New uses this to populate Client.Specialists so callers (the boot
+// banner, via ui.AppConfig) can show what's actually loaded without
+// needing to know anything about how agents are built.
+func buildRootAgent(m model.LLM, listFilesTool tool.Tool) (agent.Agent, []string, error) {
 	configs, err := loadSubAgentConfigs()
 	if err != nil {
-		return nil, fmt.Errorf("load sub-agent configs: %w", err)
+		return nil, nil, fmt.Errorf("load sub-agent configs: %w", err)
 	}
 
 	toolRegistry := map[string]tool.Tool{"list_files": listFilesTool}
 	subAgents, err := buildSubAgents(m, toolRegistry, configs)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	tools := make([]tool.Tool, 0, len(subAgents)+1)
 	tools = append(tools, listFilesTool)
-	for _, sa := range subAgents {
+	names := make([]string, len(subAgents))
+	for i, sa := range subAgents {
 		tools = append(tools, agenttool.New(sa, nil))
+		names[i] = sa.Name()
 	}
 
 	root, err := llmagent.New(llmagent.Config{
@@ -74,10 +81,10 @@ func buildRootAgent(m model.LLM, listFilesTool tool.Tool) (agent.Agent, error) {
 		Tools:       tools,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("create agent: %w", err)
+		return nil, nil, fmt.Errorf("create agent: %w", err)
 	}
 
-	return root, nil
+	return root, names, nil
 }
 
 // rootInstructionFor appends a generated "Available specialists" list

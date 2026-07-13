@@ -119,9 +119,13 @@ type AppConfig struct {
 	NewBackend BackendFactory
 	// ModelName is shown in the boot banner. "" renders as "unknown".
 	ModelName string
-	// AgentName is the backend's agent name, shown in the boot banner and
-	// the header. "" renders as "unknown".
+	// AgentName is the backend's agent name, shown in the header. ""
+	// renders as "unknown".
 	AgentName string
+	// Specialists is the name of every sub-agent the backend loaded at
+	// startup (empty if none), shown in the boot banner. Meaningless
+	// without a Backend — leave nil when Backend is nil.
+	Specialists []string
 }
 
 // NewApp constructs the app with the default (first-registered) theme
@@ -142,9 +146,9 @@ func NewApp(cfg AppConfig) *App {
 		newBackend: cfg.NewBackend,
 		sessionID:  newSessionID(),
 		bootInfo: BootInfo{
-			Agent:     orPlaceholder(cfg.AgentName, "unknown"),
-			Model:     cfg.ModelName,
-			Connected: cfg.Backend != nil,
+			Model:       cfg.ModelName,
+			Theme:       mgr.Current().Name,
+			Specialists: cfg.Specialists,
 		},
 		agentName:     cfg.AgentName,
 		status:        theme.StatusIdle,
