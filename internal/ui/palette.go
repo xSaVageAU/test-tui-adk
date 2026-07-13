@@ -21,6 +21,7 @@ const (
 	paletteSettings
 	paletteKeyInput // not list-backed — see keyinput.go
 	paletteConfirm  // list-backed (Approve/Deny) but has its own key handler — see hitl.go
+	paletteSessions // see sessions.go
 )
 
 // paletteItem is a single row in any popup menu (themes, settings). id is

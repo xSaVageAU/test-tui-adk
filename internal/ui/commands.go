@@ -6,6 +6,7 @@ import (
 
 	"tui-testing/internal/theme"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -18,6 +19,8 @@ type commandSpec struct {
 }
 
 var commandSpecs = []commandSpec{
+	{Name: "new", Desc: "Start a new session"},
+	{Name: "sessions", Desc: "Switch to a past session"},
 	{Name: "theme", Desc: "Change the color theme"},
 	{Name: "settings", Desc: "Adjust settings"},
 	{Name: "key", Desc: "Set your GOOGLE_API_KEY"},
@@ -65,9 +68,16 @@ func renderSuggestions(s theme.Styles, matches []commandSpec, selected, width in
 
 // runCommand dispatches a slash command typed into the input (the leading
 // "/" already stripped). Unknown commands surface as a system message
-// rather than being silently sent as chat.
-func (a *App) runCommand(name string) {
+// rather than being silently sent as chat. Returns a tea.Cmd for the one
+// command (/sessions) that needs an async backend round-trip before it
+// has anything to show; every other command acts synchronously and
+// returns nil.
+func (a *App) runCommand(name string) tea.Cmd {
 	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "new":
+		a.startNewSession()
+	case "sessions":
+		return a.openSessionsMenu()
 	case "theme":
 		a.openThemeMenu()
 	case "settings":
@@ -75,8 +85,9 @@ func (a *App) runCommand(name string) {
 	case "key":
 		a.openKeyInput()
 	default:
-		a.systemMessage("Unknown command: /" + name + " — try /theme, /settings, or /key.")
+		a.systemMessage("Unknown command: /" + name + " — try /new, /sessions, /theme, /settings, or /key.")
 	}
+	return nil
 }
 
 func (a *App) openThemeMenu() {
@@ -152,6 +163,8 @@ func (a *App) confirmMenuSelection(id string) {
 		a.systemMessage("Theme set to " + id + ".")
 	case paletteSettings:
 		a.toggleSetting(id)
+	case paletteSessions:
+		a.switchSession(id)
 	}
 }
 

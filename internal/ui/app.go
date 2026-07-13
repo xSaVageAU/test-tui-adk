@@ -253,6 +253,22 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.status = theme.StatusIdle
 		return a, nil
+
+	case sessionsLoadedMsg:
+		if msg.err != nil {
+			a.systemMessage("Could not list sessions: " + msg.err.Error())
+			return a, nil
+		}
+		if len(msg.sessions) == 0 {
+			a.systemMessage("No past sessions yet.")
+			return a, nil
+		}
+		items := make([]paletteItem, len(msg.sessions))
+		for i, s := range msg.sessions {
+			items[i] = paletteItem{id: s.ID, title: shortSessionID(s.ID), desc: relativeTime(s.UpdatedAt)}
+		}
+		a.openMenu(paletteSessions, "Switch session", items)
+		return a, nil
 	}
 
 	if a.paletteKind == paletteKeyInput {
@@ -337,9 +353,9 @@ func (a *App) handleSuggestKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.Send):
 		name := a.suggestMatches[a.suggestIndex].Name
 		a.input.SetValue("")
-		a.runCommand(name)
+		cmd := a.runCommand(name)
 		a.layout()
-		return a, nil
+		return a, cmd
 	}
 
 	var cmd tea.Cmd
@@ -387,9 +403,9 @@ func (a *App) handleSend() tea.Cmd {
 
 	if name, ok := strings.CutPrefix(text, "/"); ok {
 		a.input.SetValue("")
-		a.runCommand(name)
+		cmd := a.runCommand(name)
 		a.layout()
-		return nil
+		return cmd
 	}
 
 	return a.sendMessage(text)

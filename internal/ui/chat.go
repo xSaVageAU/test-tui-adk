@@ -242,6 +242,17 @@ func summarizeResult(result map[string]any) string {
 	return formatKV(result)
 }
 
+// maxArgValuePreview caps how much of a single argument value's string
+// form formatValue will show. Args are rendered as one unwrapped
+// "key=value" line (both in the tool-call line and, via formatKV, in the
+// HITL confirm-modal's title) — fine for something like a file path, but
+// an agent-as-tool specialist call's "request" argument (research/coder/
+// planner's default agenttool schema) can run to a full paragraph, and
+// without a cap that would dump the whole thing onto one line. A future
+// tool with a similarly long argument (e.g. a file's content) benefits
+// from this for free too.
+const maxArgValuePreview = 60
+
 func formatValue(v any) string {
 	if list, ok := v.([]any); ok {
 		items := make([]string, len(list))
@@ -250,7 +261,19 @@ func formatValue(v any) string {
 		}
 		return strings.Join(items, ",")
 	}
-	return fmt.Sprint(v)
+	return truncatePreview(fmt.Sprint(v), maxArgValuePreview)
+}
+
+// truncatePreview flattens s to one line (embedded newlines would
+// otherwise break the single-line key=value format) and, past max
+// characters, cuts it short with a note of how much was hidden rather
+// than showing it all.
+func truncatePreview(s string, max int) string {
+	flat := strings.Join(strings.Fields(s), " ")
+	if len(flat) <= max {
+		return flat
+	}
+	return fmt.Sprintf("%s… (%d chars)", flat[:max], len(flat))
 }
 
 // stickyPromptMaxLines caps how tall the pinned "you: ..." overlay is

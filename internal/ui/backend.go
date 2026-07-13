@@ -1,6 +1,9 @@
 package ui
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // Backend is the entire surface App needs to reach an agent — real or
 // mock. *adk.Client satisfies this structurally; ui never imports the adk
@@ -29,6 +32,18 @@ type Backend interface {
 	// more text, tool calls, or even another confirmation request before
 	// the turn finishes.
 	RespondToConfirmation(ctx context.Context, sessionID, requestID string, approved bool) (<-chan StreamChunk, error)
+
+	// ListSessions returns every past session for the current user, in
+	// no particular order (the caller sorts) — backs the /sessions
+	// picker. Listing is metadata-only (ID + last-updated time); it does
+	// not include a session's messages.
+	ListSessions(ctx context.Context) ([]SessionSummary, error)
+}
+
+// SessionSummary is one entry in Backend.ListSessions' result.
+type SessionSummary struct {
+	ID        string
+	UpdatedAt time.Time
 }
 
 // StreamChunk is one increment of a streamed reply: exactly one field is

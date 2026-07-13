@@ -19,6 +19,7 @@ package adk
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"google.golang.org/genai"
@@ -26,6 +27,7 @@ import (
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/model/gemini"
 	"google.golang.org/adk/v2/runner"
+	"google.golang.org/adk/v2/session"
 	"google.golang.org/adk/v2/tool/toolconfirmation"
 
 	"tui-testing/internal/ui"
@@ -52,7 +54,8 @@ const ModelName = "gemini-3.1-flash-lite"
 // pulled back out rather than keep something that didn't match what was
 // actually wanted. Revisit later as a deliberate, from-scratch feature.
 type Client struct {
-	runner *runner.Runner
+	runner   *runner.Runner
+	sessions session.Service
 }
 
 // New builds the Gemini model, the agent tree (see agents.go), and the
@@ -96,7 +99,7 @@ func New(ctx context.Context, apiKey string) (*Client, error) {
 		return nil, fmt.Errorf("create runner: %w", err)
 	}
 
-	return &Client{runner: r}, nil
+	return &Client{runner: r, sessions: sessSvc}, nil
 }
 
 // Send sends a single user message in the given session and returns the
@@ -152,4 +155,25 @@ func (c *Client) RespondToConfirmation(ctx context.Context, sessionID, requestID
 		}},
 	}
 	return c.runStream(ctx, sessionID, content), nil
+}
+
+// ListSessions returns every session for this app/user, most-recently-
+// updated first. Metadata-only — session.Service.List doesn't populate a
+// session's events (confirmed by reading session/database/service.go's
+// List, which queries only the sessions table), so there's no cheap way
+// to include a content preview here; ui.SessionSummary reflects that.
+func (c *Client) ListSessions(ctx context.Context) ([]ui.SessionSummary, error) {
+	resp, err := c.sessions.List(ctx, &session.ListRequest{AppName: appName, UserID: userID})
+	if err != nil {
+		return nil, fmt.Errorf("list sessions: %w", err)
+	}
+
+	summaries := make([]ui.SessionSummary, len(resp.Sessions))
+	for i, sess := range resp.Sessions {
+		summaries[i] = ui.SessionSummary{ID: sess.ID(), UpdatedAt: sess.LastUpdateTime()}
+	}
+	sort.Slice(summaries, func(i, j int) bool {
+		return summaries[i].UpdatedAt.After(summaries[j].UpdatedAt)
+	})
+	return summaries, nil
 }
