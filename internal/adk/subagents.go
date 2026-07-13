@@ -17,36 +17,35 @@ import (
 )
 
 const (
-	subAgentConfigFile      = "agent.json"
-	subAgentInstructionFile = "instruction.md"
+	agentConfigFile      = "agent.json"
+	agentInstructionFile = "instruction.md"
 )
 
-// subAgentConfig is one specialist's definition as discovered on disk:
-// one subdirectory per agent under appdir's "subagents" directory,
-// named for it, holding an agent.json (Name/Description/Tools/
-// Provider/Model) and an instruction.md (the agent's instruction, as
-// plain text/markdown). Instruction is kept in its own file rather than
-// a JSON string field so it can be written and diffed as prose, not
-// escaped inside quotes.
-type subAgentConfig struct {
+// agentFileConfig is one agent's definition as discovered on disk — the
+// shared shape for both the root agent (a single agent.json/
+// instruction.md pair directly under appdir's root — see rootagent.go)
+// and every sub-agent (one subdirectory per agent under appdir's
+// "subagents" directory, named for it — see loadSubAgentConfigs below).
+// Instruction is kept in its own file rather than a JSON string field so
+// it can be written and diffed as prose, not escaped inside quotes.
+type agentFileConfig struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
 	Tools       []string `json:"tools,omitempty"`
-	// Provider/Model override what this specialist runs on — see
-	// models.go's buildModel. Both empty (the common case) means "use
-	// whatever the root agent is configured to use," resolved by
-	// buildSubAgents rather than duplicated here.
+	// Provider/Model pick what this agent runs on — see models.go's
+	// buildModel. Both empty means "use the built-in default"
+	// (root — see rootagent.go) or "inherit the root agent's resolved
+	// model" (a sub-agent — see buildSubAgents).
 	Provider string `json:"provider,omitempty"`
 	Model    string `json:"model,omitempty"`
 
-	instruction string // from instruction.md, not agent.json — see loadSubAgentConfigs
+	instruction string // from instruction.md, not agent.json — see loadAgentFileConfig
 }
 
 // subAgentsDir returns (creating it if missing) the directory
 // config-discovered sub-agents live under. Nothing seeds it: a fresh
-// install starts with only the hardcoded root agent (see agents.go) and
-// zero specialists until a user adds one — this directory existing is
-// just so there's somewhere obvious to put one.
+// install starts with zero specialists until a user adds one — this
+// directory existing is just so there's somewhere obvious to put one.
 func subAgentsDir() (string, error) {
 	dir, err := appdir.Path("subagents")
 	if err != nil {
@@ -58,6 +57,40 @@ func subAgentsDir() (string, error) {
 	return dir, nil
 }
 
+// loadAgentFileConfig reads one agent.json/instruction.md pair from dir
+// — shared by root's loader and loadSubAgentConfigs below. A missing or
+// invalid agent.json, or an empty instruction.md, is a hard error; the
+// caller decides what "missing" should mean for its case (root
+// self-heals by seeding defaults — see rootagent.go; a sub-agent
+// directory missing either file is instead surfaced as broken, not
+// silently skipped, by loadSubAgentConfigs).
+func loadAgentFileConfig(dir string) (agentFileConfig, error) {
+	configPath := filepath.Join(dir, agentConfigFile)
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return agentFileConfig{}, err
+	}
+	var cfg agentFileConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return agentFileConfig{}, fmt.Errorf("parse %s: %w", configPath, err)
+	}
+	if cfg.Name == "" {
+		return agentFileConfig{}, fmt.Errorf("%s: missing required \"name\"", configPath)
+	}
+
+	instrPath := filepath.Join(dir, agentInstructionFile)
+	instrData, err := os.ReadFile(instrPath)
+	if err != nil {
+		return agentFileConfig{}, err
+	}
+	cfg.instruction = strings.TrimSpace(string(instrData))
+	if cfg.instruction == "" {
+		return agentFileConfig{}, fmt.Errorf("%s: instruction is empty", instrPath)
+	}
+
+	return cfg, nil
+}
+
 // loadSubAgentConfigs discovers every sub-agent under subAgentsDir(): one
 // subdirectory per agent, each required to hold both agent.json and
 // instruction.md. A subdirectory missing either file (or with invalid
@@ -67,7 +100,7 @@ func subAgentsDir() (string, error) {
 // list. Directories are read in os.ReadDir's order (lexical by name),
 // which is what controls display order in the root's generated
 // instruction, since nothing else orders them.
-func loadSubAgentConfigs() ([]subAgentConfig, error) {
+func loadSubAgentConfigs() ([]agentFileConfig, error) {
 	dir, err := subAgentsDir()
 	if err != nil {
 		return nil, err
@@ -78,36 +111,16 @@ func loadSubAgentConfigs() ([]subAgentConfig, error) {
 		return nil, fmt.Errorf("read subagents dir: %w", err)
 	}
 
-	var configs []subAgentConfig
+	var configs []agentFileConfig
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
 		agentDir := filepath.Join(dir, e.Name())
-
-		configPath := filepath.Join(agentDir, subAgentConfigFile)
-		data, err := os.ReadFile(configPath)
+		cfg, err := loadAgentFileConfig(agentDir)
 		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", configPath, err)
+			return nil, fmt.Errorf("sub-agent %q: %w", e.Name(), err)
 		}
-		var cfg subAgentConfig
-		if err := json.Unmarshal(data, &cfg); err != nil {
-			return nil, fmt.Errorf("parse %s: %w", configPath, err)
-		}
-		if cfg.Name == "" {
-			return nil, fmt.Errorf("%s: missing required \"name\"", configPath)
-		}
-
-		instrPath := filepath.Join(agentDir, subAgentInstructionFile)
-		instrData, err := os.ReadFile(instrPath)
-		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", instrPath, err)
-		}
-		cfg.instruction = strings.TrimSpace(string(instrData))
-		if cfg.instruction == "" {
-			return nil, fmt.Errorf("%s: instruction is empty", instrPath)
-		}
-
 		configs = append(configs, cfg)
 	}
 	return configs, nil
@@ -123,7 +136,7 @@ func loadSubAgentConfigs() ([]subAgentConfig, error) {
 // there's only ever one provider's key available today (see
 // credentials.go), so this only actually matters once a config asks for
 // a provider other than Gemini, which buildModel rejects outright.
-func buildSubAgents(ctx context.Context, apiKey string, rootModel model.LLM, toolRegistry map[string]tool.Tool, configs []subAgentConfig) ([]agent.Agent, error) {
+func buildSubAgents(ctx context.Context, apiKey string, rootModel model.LLM, toolRegistry map[string]tool.Tool, configs []agentFileConfig) ([]agent.Agent, error) {
 	agents := make([]agent.Agent, 0, len(configs))
 	for _, cfg := range configs {
 		tools := make([]tool.Tool, 0, len(cfg.Tools))

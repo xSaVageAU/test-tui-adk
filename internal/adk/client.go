@@ -29,7 +29,6 @@ import (
 	"google.golang.org/adk/v2/session"
 	"google.golang.org/adk/v2/tool/toolconfirmation"
 
-	"tui-testing/internal/settings"
 	"tui-testing/internal/ui"
 )
 
@@ -58,16 +57,15 @@ type Client struct {
 	// loaded without reaching into agent-building internals.
 	specialists []string
 
-	// modelName is the root agent's resolved model name — whatever
-	// settings.json's agent.model says, or DefaultModelName if it
-	// doesn't specify one. Exposed via ModelName for the boot banner,
-	// same reasoning as specialists.
+	// modelName is the root agent's resolved model name — whatever its
+	// own agent.json says, or DefaultModelName if it doesn't specify
+	// one. Exposed via ModelName for the boot banner, same reasoning as
+	// specialists.
 	modelName string
 }
 
-// New builds the root agent's model (provider/model chosen by
-// settings.json's agent section — see models.go), the agent tree (see
-// agents.go), and the runner backing it, from the given API key.
+// New builds the root agent (config-driven — see agents.go and
+// rootagent.go) and the runner backing it, from the given API key.
 // Sourcing the key (env var at startup, a value typed into the /key
 // popup, ...) is entirely the caller's concern; this just validates and
 // uses whatever it's handed. Returns an error rather than panicking so
@@ -77,30 +75,19 @@ func New(ctx context.Context, apiKey string) (*Client, error) {
 		return nil, fmt.Errorf("no API key given")
 	}
 
-	cfg := settings.Load()
-
-	rootModel, err := buildModel(ctx, cfg.Agent.Provider, cfg.Agent.Model, apiKey)
-	if err != nil {
-		return nil, fmt.Errorf("create root model: %w", err)
-	}
-	modelName := cfg.Agent.Model
-	if modelName == "" {
-		modelName = DefaultModelName
-	}
-
 	sessSvc, err := openSessionStore()
 	if err != nil {
 		return nil, fmt.Errorf("open session store: %w", err)
 	}
 
-	root, specialists, err := buildRootAgent(ctx, apiKey, rootModel)
+	built, err := buildRootAgent(ctx, apiKey)
 	if err != nil {
 		return nil, err
 	}
 
 	r, err := runner.New(runner.Config{
 		AppName:           appName,
-		Agent:             root,
+		Agent:             built.Agent,
 		SessionService:    sessSvc,
 		AutoCreateSession: true,
 	})
@@ -108,7 +95,12 @@ func New(ctx context.Context, apiKey string) (*Client, error) {
 		return nil, fmt.Errorf("create runner: %w", err)
 	}
 
-	return &Client{runner: r, sessions: sessSvc, specialists: specialists, modelName: modelName}, nil
+	return &Client{
+		runner:      r,
+		sessions:    sessSvc,
+		specialists: built.Specialists,
+		modelName:   built.ModelName,
+	}, nil
 }
 
 // Specialists returns the name of every sub-agent that was discovered
@@ -121,6 +113,20 @@ func (c *Client) Specialists() []string {
 // ModelName returns the root agent's resolved model name.
 func (c *Client) ModelName() string {
 	return c.modelName
+}
+
+// RootAgentName reads just the root agent's configured name, without
+// building a model or needing an API key — main.go uses this to show
+// the right name in the header/boot banner even before a connection
+// exists (or if one never succeeds). Seeds the default config the same
+// way buildRootAgent's own load does, so calling this before New is
+// always safe and never conjures a different name than New would use.
+func RootAgentName() (string, error) {
+	cfg, err := loadRootAgentConfig()
+	if err != nil {
+		return "", err
+	}
+	return cfg.Name, nil
 }
 
 // Send sends a single user message in the given session and returns the

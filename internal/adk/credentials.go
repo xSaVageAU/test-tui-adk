@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-
-	"tui-testing/internal/appdir"
 )
 
 // providerGemini identifies Gemini in the persisted credentials file
@@ -25,11 +23,11 @@ type credentialsFile struct {
 }
 
 // SaveAPIKey persists apiKey as the Gemini provider's credential in
-// appdir's credentials.json, creating or updating the file. Called only
-// after a key has been proven to work (New succeeded with it) — see
-// main.go's newBackend — so a typo'd key never ends up on disk.
+// appdir's data/credentials.json, creating or updating the file. Called
+// only after a key has been proven to work (New succeeded with it) —
+// see main.go's newBackend — so a typo'd key never ends up on disk.
 func SaveAPIKey(apiKey string) error {
-	path, err := appdir.Path("credentials.json")
+	path, err := dataPath("credentials.json")
 	if err != nil {
 		return fmt.Errorf("resolve credentials path: %w", err)
 	}
@@ -64,7 +62,7 @@ func SaveAPIKey(apiKey string) error {
 // never been used) has no credentials file at all, which is not an
 // error condition here.
 func LoadAPIKey() (string, error) {
-	path, err := appdir.Path("credentials.json")
+	path, err := dataPath("credentials.json")
 	if err != nil {
 		return "", fmt.Errorf("resolve credentials path: %w", err)
 	}

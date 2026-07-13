@@ -2,6 +2,8 @@ package adk
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -25,14 +27,30 @@ func silentGormConfig() *gorm.Config {
 	return &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)}
 }
 
+// dataPath resolves a path under appdir's "data" subdirectory (creating
+// it if missing) — sqlite session storage and credentials.json live
+// here, kept apart from the plainly human-editable files (agent.json,
+// settings.json, subagents/, themes/) directly in appdir's root.
+func dataPath(elem ...string) (string, error) {
+	dir, err := appdir.Path("data")
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	return filepath.Join(append([]string{dir}, elem...)...), nil
+}
+
 // openSessionStore builds the persistent session service, backed by a
-// sqlite file in appdir.Dir() (via the pure-Go glebarez/sqlite driver —
-// already an ADK transitive dependency, and CGO-free, which matters for
-// staying a single portable cross-compilable binary). The on-disk schema
-// is entirely ADK's own — database.NewSessionService/AutoMigrate define
-// and migrate it; nothing here touches it.
+// sqlite file in appdir's "data" subdirectory (via the pure-Go
+// glebarez/sqlite driver — already an ADK transitive dependency, and
+// CGO-free, which matters for staying a single portable
+// cross-compilable binary). The on-disk schema is entirely ADK's own —
+// database.NewSessionService/AutoMigrate define and migrate it; nothing
+// here touches it.
 func openSessionStore() (session.Service, error) {
-	path, err := appdir.Path("data.db")
+	path, err := dataPath("data.db")
 	if err != nil {
 		return nil, fmt.Errorf("resolve data dir: %w", err)
 	}

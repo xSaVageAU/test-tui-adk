@@ -1,12 +1,10 @@
-// Package settings owns ~/.tui-testing/settings.json — the app's one
-// general-purpose settings file, distinct from credentials.json
-// (secrets) and a sub-agent's own agent.json (per-specialist config).
-// It's a neutral package, like internal/appdir and internal/theme:
-// internal/ui (writes the UI section whenever a /settings toggle
-// changes, reads it at startup) and internal/adk (only ever reads the
-// Agent section, hand-edited by the user, to pick the root agent's
-// provider/model) both import this directly rather than one importing
-// the other.
+// Package settings owns ~/.tui-testing/settings.json — the app's
+// general-purpose UI settings file, distinct from credentials.json
+// (secrets) and an agent's own agent.json (root or sub-agent config,
+// including which provider/model it runs on — see internal/adk). It's a
+// neutral package, like internal/appdir and internal/theme:
+// internal/ui both writes this (whenever a /settings toggle changes)
+// and reads it at startup.
 package settings
 
 import (
@@ -16,10 +14,12 @@ import (
 	"tui-testing/internal/appdir"
 )
 
-// Settings is the whole shape of settings.json.
+// Settings is the whole shape of settings.json. Wrapped in a "ui" key
+// rather than being flat so a future unrelated section (not agent
+// config — that lives in agent.json now) has somewhere to go without a
+// migration.
 type Settings struct {
-	UI    UISettings    `json:"ui"`
-	Agent AgentSettings `json:"agent"`
+	UI UISettings `json:"ui"`
 }
 
 // UISettings mirrors the toggles /settings exposes in the TUI — see
@@ -31,27 +31,20 @@ type UISettings struct {
 	HITLMode      string `json:"hitlMode"` // "modal" or "inline"
 }
 
-// AgentSettings picks the root agent's provider/model. Hand-edited by
-// the user, the same way a sub-agent's own agent.json is — this app
-// never writes this section itself. Empty fields mean "use
-// internal/adk's built-in default," resolved there rather than here,
-// since what that default actually is is an adk-domain concern.
-type AgentSettings struct {
-	Provider string `json:"provider,omitempty"`
-	Model    string `json:"model,omitempty"`
-}
-
 // DefaultUISettings is what a fresh install (no settings.json yet, or
 // one whose UI section is missing/malformed) starts from.
 func DefaultUISettings() UISettings {
 	return UISettings{HighlightUser: true, StreamReplies: true, HITLMode: "modal"}
 }
 
-// Load reads settings.json, falling back to DefaultUISettings() for the
-// UI section (and a zero AgentSettings, meaning "use the built-in
-// default") whenever the file is missing, unreadable, or malformed —
-// always returns something usable, never an error the caller needs to
-// handle specially, matching theme.Load()'s same best-effort shape.
+// Load reads settings.json, falling back to DefaultUISettings()
+// whenever the file is missing, unreadable, or malformed — always
+// returns something usable, never an error the caller needs to handle
+// specially, matching theme.Load()'s same best-effort shape. If the
+// file didn't exist at all (a fresh install), the defaults are written
+// out immediately — same self-heal-on-load behavior as the root agent's
+// config (see internal/adk/rootagent.go) — so settings.json shows up on
+// disk from first launch, not only after the first toggle change.
 func Load() Settings {
 	fallback := Settings{UI: DefaultUISettings()}
 
@@ -61,6 +54,9 @@ func Load() Settings {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			_ = Save(fallback) // best-effort; Load must still work even if this fails
+		}
 		return fallback
 	}
 	var s Settings
@@ -73,10 +69,7 @@ func Load() Settings {
 	return s
 }
 
-// Save persists the whole Settings value, overwriting the file. A
-// caller that only means to change the UI section should Load first and
-// mutate that field in place, so the Agent section — hand-edited by the
-// user — round-trips untouched.
+// Save persists the whole Settings value, overwriting the file.
 func Save(s Settings) error {
 	path, err := appdir.Path("settings.json")
 	if err != nil {

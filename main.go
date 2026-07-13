@@ -43,6 +43,15 @@ func main() {
 	var specialists []string
 	var modelName string
 
+	// Read independently of whether a connection ever succeeds — the
+	// header/boot banner should show the configured name even before
+	// (or without) a working API key, same as list_files et al. being
+	// discoverable without one.
+	agentName, err := adk.RootAgentName()
+	if err != nil {
+		note = "Could not load the root agent's config: " + err.Error()
+	}
+
 	// The environment variable always wins if set; otherwise fall back to
 	// whatever /key last saved (see newBackend). Startup itself never
 	// writes to the credentials file — only an explicit /key does.
@@ -71,7 +80,7 @@ func main() {
 		BackendNote: note,
 		NewBackend:  newBackend,
 		ModelName:   modelName,
-		AgentName:   adk.AgentName,
+		AgentName:   agentName,
 		Specialists: specialists,
 	})
 
