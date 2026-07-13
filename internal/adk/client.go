@@ -85,12 +85,7 @@ func New(ctx context.Context, apiKey string) (*Client, error) {
 		return nil, fmt.Errorf("open session store: %w", err)
 	}
 
-	listFilesTool, err := newListFilesTool()
-	if err != nil {
-		return nil, fmt.Errorf("create list_files tool: %w", err)
-	}
-
-	root, specialists, err := buildRootAgent(model, listFilesTool)
+	root, specialists, err := buildRootAgent(model)
 	if err != nil {
 		return nil, err
 	}

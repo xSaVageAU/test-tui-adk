@@ -46,20 +46,43 @@ const (
 // Every discovered specialist is wrapped via agenttool.New so the root
 // consults it like a function call rather than transferring the
 // conversation to it — see AgentName's doc comment for why.
-// listFilesTool is shared verbatim across every agent that wants it and
-// is the only tool a sub-agent config can currently reference by name.
+//
+// Every tool a sub-agent config can reference by name is built here and
+// put in toolRegistry — currently list_files, read_file, and
+// write_file. The root itself only gets list_files directly, same as
+// before; read_file/write_file exist purely for a sub-agent's own
+// agent.json to opt into, so a fresh install (zero specialists) has no
+// agent capable of touching file contents at all until a user
+// deliberately configures one that can.
 //
 // Also returns the discovered specialists' names, in load order —
 // New uses this to populate Client.Specialists so callers (the boot
 // banner, via ui.AppConfig) can show what's actually loaded without
 // needing to know anything about how agents are built.
-func buildRootAgent(m model.LLM, listFilesTool tool.Tool) (agent.Agent, []string, error) {
+func buildRootAgent(m model.LLM) (agent.Agent, []string, error) {
+	listFilesTool, err := newListFilesTool()
+	if err != nil {
+		return nil, nil, fmt.Errorf("create list_files tool: %w", err)
+	}
+	readFileTool, err := newReadFileTool()
+	if err != nil {
+		return nil, nil, fmt.Errorf("create read_file tool: %w", err)
+	}
+	writeFileTool, err := newWriteFileTool()
+	if err != nil {
+		return nil, nil, fmt.Errorf("create write_file tool: %w", err)
+	}
+	toolRegistry := map[string]tool.Tool{
+		"list_files": listFilesTool,
+		"read_file":  readFileTool,
+		"write_file": writeFileTool,
+	}
+
 	configs, err := loadSubAgentConfigs()
 	if err != nil {
 		return nil, nil, fmt.Errorf("load sub-agent configs: %w", err)
 	}
 
-	toolRegistry := map[string]tool.Tool{"list_files": listFilesTool}
 	subAgents, err := buildSubAgents(m, toolRegistry, configs)
 	if err != nil {
 		return nil, nil, err
