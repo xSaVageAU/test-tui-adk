@@ -22,17 +22,19 @@ import (
 // and every specialist that wants it (functiontool.New just builds a
 // schema/handler pair — it's not agent-specific state, so the same
 // tool.Tool value can be handed to more than one agent's Tools list).
+// Deliberately no RequireConfirmation: it's read-only, so there's
+// nothing to approve, and — more importantly — a sub-agent invoked via
+// agent-as-tool has no way to ever resolve a confirmation at all (its
+// runner is a disposable internal one only agenttool.Run drives; only
+// the top-level UI's Client.RespondToConfirmation can ever answer one).
+// A confirmation-gated tool handed to a sub-agent just dead-ends the
+// instant it's called — see [[tool-call-concurrency]] in memory for the
+// full trace of why. Only give a sub-agent a tool that needs no human
+// approval.
 func newListFilesTool() (tool.Tool, error) {
 	t, err := functiontool.New(functiontool.Config{
 		Name:        "list_files",
 		Description: "Lists files and directories at the given path. Defaults to the current working directory if path is omitted.",
-		// RequireConfirmation hands the pause/resume orchestration to ADK
-		// entirely: it emits a toolconfirmation.FunctionCallName event
-		// instead of running listFiles, and either runs it or reports it
-		// declined once we answer via Client.RespondToConfirmation.
-		// listFiles itself needs no changes for this — see the HITL
-		// handling in eventstream.go.
-		RequireConfirmation: true,
 	}, listFiles)
 	if err != nil {
 		return nil, err
