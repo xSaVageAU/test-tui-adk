@@ -127,7 +127,7 @@ type AppConfig struct {
 // NewApp constructs the app with the default (first-registered) theme
 // active.
 func NewApp(cfg AppConfig) *App {
-	mgr := theme.NewManager(theme.Defaults()...)
+	mgr := theme.NewManager(theme.Load()...)
 	styles := mgr.Styles()
 
 	var messages []ChatMessage

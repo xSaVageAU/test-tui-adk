@@ -1,0 +1,17 @@
+{
+  "name": "Nord",
+  "background": "#2e3440",
+  "surface": "#3b4252",
+  "highlight": "#434c5e",
+  "border": "#4c566a",
+  "borderFocus": "#88c0d0",
+  "text": "#e5e9f0",
+  "textMuted": "#b8c2d6",
+  "textFaint": "#7b869a",
+  "textOnFill": "#2e3440",
+  "accent": "#88c0d0",
+  "accentMuted": "#5e81ac",
+  "success": "#a3be8c",
+  "warning": "#ebcb8b",
+  "error": "#bf616a"
+}

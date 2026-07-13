@@ -3,37 +3,44 @@
 // set of lipgloss.Style values derived from a Theme. Nothing else in the
 // app should construct a lipgloss.Style with a raw color — everything goes
 // through here so that swapping a Theme repaints the entire UI.
+//
+// Themes are config, not code: the built-ins live as JSON files under
+// defaults/, embedded into the binary (see load.go's Load), and a user's
+// own themes are discovered from a "themes" directory in appdir at
+// runtime — same shape, just read from disk instead of go:embed.
 package theme
 
 import "github.com/charmbracelet/lipgloss"
 
 // Theme is a palette of semantic color tokens. Keep it to roles ("what is
 // this color for"), not specific widgets ("what color is the header") —
-// that mapping lives in Styles.
+// that mapping lives in Styles. json tags are what both the embedded
+// defaults and a user's custom theme files are parsed against — see
+// load.go.
 type Theme struct {
-	Name string
+	Name string `json:"name"`
 
 	// Surfaces
-	Background lipgloss.Color
-	Surface    lipgloss.Color // slightly raised panels (input bar, palette)
-	Highlight  lipgloss.Color // backdrop tint for callout blocks (e.g. a highlighted message)
+	Background lipgloss.Color `json:"background"`
+	Surface    lipgloss.Color `json:"surface"`   // slightly raised panels (input bar, palette)
+	Highlight  lipgloss.Color `json:"highlight"` // backdrop tint for callout blocks (e.g. a highlighted message)
 
 	// Borders
-	Border      lipgloss.Color
-	BorderFocus lipgloss.Color
+	Border      lipgloss.Color `json:"border"`
+	BorderFocus lipgloss.Color `json:"borderFocus"`
 
 	// Text
-	Text       lipgloss.Color
-	TextMuted  lipgloss.Color
-	TextFaint  lipgloss.Color
-	TextOnFill lipgloss.Color // text drawn on top of an Accent-filled background
+	Text       lipgloss.Color `json:"text"`
+	TextMuted  lipgloss.Color `json:"textMuted"`
+	TextFaint  lipgloss.Color `json:"textFaint"`
+	TextOnFill lipgloss.Color `json:"textOnFill"` // text drawn on top of an Accent-filled background
 
 	// Brand / accent
-	Accent      lipgloss.Color
-	AccentMuted lipgloss.Color
+	Accent      lipgloss.Color `json:"accent"`
+	AccentMuted lipgloss.Color `json:"accentMuted"`
 
 	// Status
-	Success lipgloss.Color
-	Warning lipgloss.Color
-	Error   lipgloss.Color
+	Success lipgloss.Color `json:"success"`
+	Warning lipgloss.Color `json:"warning"`
+	Error   lipgloss.Color `json:"error"`
 }

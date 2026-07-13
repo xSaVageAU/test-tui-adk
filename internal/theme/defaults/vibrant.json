@@ -1,0 +1,17 @@
+{
+  "name": "Vibrant",
+  "background": "#0f0a1e",
+  "surface": "#1f1533",
+  "highlight": "#2a1b45",
+  "border": "#4a3a6a",
+  "borderFocus": "#ff6ac1",
+  "text": "#f2eaff",
+  "textMuted": "#b9a8db",
+  "textFaint": "#75619e",
+  "textOnFill": "#0f0a1e",
+  "accent": "#ff6ac1",
+  "accentMuted": "#a34d82",
+  "success": "#5df4a3",
+  "warning": "#ffd166",
+  "error": "#ff5c7c"
+}

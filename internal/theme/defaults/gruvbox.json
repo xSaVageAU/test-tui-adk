@@ -1,0 +1,17 @@
+{
+  "name": "Gruvbox",
+  "background": "#282828",
+  "surface": "#3c3836",
+  "highlight": "#504945",
+  "border": "#504945",
+  "borderFocus": "#fe8019",
+  "text": "#ebdbb2",
+  "textMuted": "#bdae93",
+  "textFaint": "#928374",
+  "textOnFill": "#282828",
+  "accent": "#fe8019",
+  "accentMuted": "#d65d0e",
+  "success": "#b8bb26",
+  "warning": "#fabd2f",
+  "error": "#fb4934"
+}

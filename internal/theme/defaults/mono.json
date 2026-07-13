@@ -1,0 +1,17 @@
+{
+  "name": "Mono",
+  "background": "#0d0d0d",
+  "surface": "#1a1a1a",
+  "highlight": "#1c2b2b",
+  "border": "#3a3a3a",
+  "borderFocus": "#6fd1d1",
+  "text": "#e6e6e6",
+  "textMuted": "#a0a0a0",
+  "textFaint": "#666666",
+  "textOnFill": "#0d0d0d",
+  "accent": "#6fd1d1",
+  "accentMuted": "#3f7d7d",
+  "success": "#8fd694",
+  "warning": "#e6c07b",
+  "error": "#e06c75"
+}
