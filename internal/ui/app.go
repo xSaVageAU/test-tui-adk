@@ -69,7 +69,8 @@ type App struct {
 	streamReplies  bool   // token-by-token replies via Backend.Stream instead of Send
 	lastPromptText string // most recent user message; backs the sticky-prompt overlay in View()
 
-	hitlMode            hitlMode // how a pending tool approval is presented — see hitl.go
+	hitlMode            hitlMode       // how a pending tool approval is presented — see hitl.go
+	permissionMode      permissionMode // whether a confirmation-gated tool call asks at all — see permissions.go
 	pendingConfirmation *pendingConfirmation
 
 	// In-flight stream state, set by streamStartMsg and cleared once the
@@ -152,15 +153,16 @@ func NewApp(cfg AppConfig) *App {
 			Theme:       mgr.Current().Name,
 			Specialists: cfg.Specialists,
 		},
-		agentName:     cfg.AgentName,
-		status:        theme.StatusIdle,
-		highlightUser: uiSettings.HighlightUser,
-		streamReplies: uiSettings.StreamReplies,
-		hitlMode:      parseHITLMode(uiSettings.HITLMode),
-		inputLines:    minInputLines,
-		messages:      messages,
-		input:         newInput(styles),
-		help:          help.New(),
+		agentName:      cfg.AgentName,
+		status:         theme.StatusIdle,
+		highlightUser:  uiSettings.HighlightUser,
+		streamReplies:  uiSettings.StreamReplies,
+		hitlMode:       parseHITLMode(uiSettings.HITLMode),
+		permissionMode: parsePermissionMode(uiSettings.PermissionMode),
+		inputLines:     minInputLines,
+		messages:       messages,
+		input:          newInput(styles),
+		help:           help.New(),
 	}
 	a.help.ShortSeparator = "  "
 	return a
@@ -304,6 +306,10 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Quit):
 		return a, tea.Quit
+
+	case key.Matches(msg, keys.AutoAccept):
+		a.toggleAutoAccept()
+		return a, nil
 
 	case a.paletteKind == paletteKeyInput:
 		return a.handleKeyInputKey(msg)
@@ -751,7 +757,7 @@ func (a *App) View() string {
 		return ""
 	}
 
-	topBar := renderTopBar(a.styles, a.width, a.agentName, a.status, a.sessionID)
+	topBar := renderTopBar(a.styles, a.width, a.agentName, a.status, a.sessionID, a.permissionMode == permissionFullAuto)
 	body := a.viewport.View()
 	if sticky := a.stickyPromptOverlay(); sticky != "" {
 		body = overlay(body, sticky, 0, 0, a.viewport.Width)

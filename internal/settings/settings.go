@@ -29,12 +29,29 @@ type UISettings struct {
 	HighlightUser bool   `json:"highlightUser"`
 	StreamReplies bool   `json:"streamReplies"`
 	HITLMode      string `json:"hitlMode"` // "modal" or "inline"
+	// PermissionMode governs whether a confirmation-gated tool call
+	// (write_file today) actually asks for approval — see
+	// internal/adk/toolgate.go's confirmGated, the actual consumer of
+	// this value. Any value other than ModeFullAuto (including "",
+	// covering an older settings.json written before this field
+	// existed) is treated as ModeNormal — deliberately fail-safe rather
+	// than needing its own explicit "missing/malformed" handling here.
+	PermissionMode string `json:"permissionMode"`
 }
+
+// ModeNormal/ModeFullAuto are PermissionMode's only two valid values —
+// pre-defined, not yet user-customizable per-tool (see the
+// config-discovery-pattern memory for the fuller design intent this is
+// a first slice of).
+const (
+	ModeNormal   = "normal"
+	ModeFullAuto = "full-auto"
+)
 
 // DefaultUISettings is what a fresh install (no settings.json yet, or
 // one whose UI section is missing/malformed) starts from.
 func DefaultUISettings() UISettings {
-	return UISettings{HighlightUser: true, StreamReplies: true, HITLMode: "modal"}
+	return UISettings{HighlightUser: true, StreamReplies: true, HITLMode: "modal", PermissionMode: ModeNormal}
 }
 
 // Load reads settings.json, falling back to DefaultUISettings()

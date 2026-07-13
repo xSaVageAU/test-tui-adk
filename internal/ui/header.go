@@ -10,17 +10,25 @@ import (
 
 // renderTopBar draws the fixed two-line panel pinned to the top of the
 // screen: a plain meta line (session id, active agent, status — in that
-// left-to-right order) followed by a solid horizontal rule separating it
-// from the chat below. No filled background panel and no platform
-// branding — just enough to orient you.
-func renderTopBar(s theme.Styles, width int, agent string, status theme.StatusKind, sessionID string) string {
-	meta := lipgloss.JoinHorizontal(lipgloss.Left,
+// left-to-right order, plus an "auto-accept" badge when that permission
+// mode is active) followed by a solid horizontal rule separating it from
+// the chat below. No filled background panel and no platform branding —
+// just enough to orient you.
+func renderTopBar(s theme.Styles, width int, agent string, status theme.StatusKind, sessionID string, autoAccept bool) string {
+	parts := []string{
 		s.HeaderSession.Render(shortSessionID(sessionID)),
 		s.HeaderTitle.Render(" · "),
 		s.HeaderAgent.Render(agent),
 		s.HeaderTitle.Render(" · "),
 		s.HeaderStatus(status).Render(statusLabel(status)),
-	)
+	}
+	// Only shown while active — the common (normal-mode) case stays as
+	// uncluttered as it always was, and this is meant to be a "notice
+	// something's different" flag, not a permanent fixture.
+	if autoAccept {
+		parts = append(parts, s.HeaderTitle.Render(" · "), s.HeaderAutoBadge.Render("AUTO-ACCEPT"))
+	}
+	meta := lipgloss.JoinHorizontal(lipgloss.Left, parts...)
 
 	line := s.Header.Width(width - 2).Render(meta)
 	rule := s.HeaderRule.Render(strings.Repeat("─", width))

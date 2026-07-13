@@ -22,16 +22,12 @@ import (
 // and every specialist that wants it (functiontool.New just builds a
 // schema/handler pair — it's not agent-specific state, so the same
 // tool.Tool value can be handed to more than one agent's Tools list).
-// Deliberately no RequireConfirmation: it's read-only, so there's
-// nothing to approve, and — more importantly — a sub-agent invoked via
-// agent-as-tool has no way to ever resolve a confirmation at all (its
-// runner is a disposable internal one only agenttool.Run drives; only
-// the top-level UI's Client.RespondToConfirmation can ever answer one).
-// A confirmation-gated tool handed to a sub-agent just dead-ends the
-// instant it's called — see [[tool-call-concurrency]] in memory for the
-// full trace of why. Only give a sub-agent a tool that needs no human
-// approval.
-func newListFilesTool() (tool.Tool, error) {
+// rootName is threaded through to confirmGated — see toolgate.go — so it
+// can tell a root call apart from a sub-agent one; it never actually
+// requires confirmation in "normal" mode (it's read-only, nothing to
+// approve), but is still wrapped for consistency and in case a future
+// mode wants it gated.
+func newListFilesTool(rootName string) (tool.Tool, error) {
 	t, err := functiontool.New(functiontool.Config{
 		Name:        "list_files",
 		Description: "Lists files and directories at the given path. Defaults to the current working directory if path is omitted.",
@@ -39,7 +35,7 @@ func newListFilesTool() (tool.Tool, error) {
 	if err != nil {
 		return nil, err
 	}
-	return gated(t, listFilesResources), nil
+	return gated(confirmGated(t, false, rootName), listFilesResources), nil
 }
 
 // Struct comments here are just for human readers — jsonschema-go (what
@@ -89,9 +85,9 @@ func listFilesResources(args map[string]any) []resourceRef {
 }
 
 // newReadFileTool builds the read_file tool — read-only, so it needs no
-// confirmation (nothing to approve) and never conflicts with another
-// read, only with a write on the same path.
-func newReadFileTool() (tool.Tool, error) {
+// confirmation in any mode (nothing to approve) and never conflicts
+// with another read, only with a write on the same path.
+func newReadFileTool(rootName string) (tool.Tool, error) {
 	t, err := functiontool.New(functiontool.Config{
 		Name:        "read_file",
 		Description: "Reads and returns the full contents of a file at the given path.",
@@ -99,7 +95,7 @@ func newReadFileTool() (tool.Tool, error) {
 	if err != nil {
 		return nil, err
 	}
-	return gated(t, readFileResources), nil
+	return gated(confirmGated(t, false, rootName), readFileResources), nil
 }
 
 type readFileArgs struct {
@@ -124,19 +120,21 @@ func readFileResources(args map[string]any) []resourceRef {
 }
 
 // newWriteFileTool builds the write_file tool — destructive (creates or
-// overwrites its target), so it always requires confirmation, and its
-// resource is a write, conflicting with any read/write/listing that
-// overlaps its path.
-func newWriteFileTool() (tool.Tool, error) {
+// overwrites its target), so it requires confirmation in "normal" mode
+// (not statically via functiontool.Config.RequireConfirmation anymore —
+// see toolgate.go's confirmGated for why that couldn't stay a static
+// flag once the permission-mode/sub-agent-auto-accept logic needed
+// per-call context). Its resource is a write, conflicting with any
+// read/write/listing that overlaps its path.
+func newWriteFileTool(rootName string) (tool.Tool, error) {
 	t, err := functiontool.New(functiontool.Config{
-		Name:                "write_file",
-		Description:         "Writes content to a file at the given path, creating it or overwriting it if it already exists.",
-		RequireConfirmation: true,
+		Name:        "write_file",
+		Description: "Writes content to a file at the given path, creating it or overwriting it if it already exists.",
 	}, writeFile)
 	if err != nil {
 		return nil, err
 	}
-	return gated(t, writeFileResources), nil
+	return gated(confirmGated(t, true, rootName), writeFileResources), nil
 }
 
 type writeFileArgs struct {

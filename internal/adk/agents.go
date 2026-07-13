@@ -42,15 +42,15 @@ func buildRootAgent(ctx context.Context, apiKey string) (builtRoot, error) {
 		return builtRoot{}, fmt.Errorf("load root agent config: %w", err)
 	}
 
-	listFilesTool, err := newListFilesTool()
+	listFilesTool, err := newListFilesTool(rootCfg.Name)
 	if err != nil {
 		return builtRoot{}, fmt.Errorf("create list_files tool: %w", err)
 	}
-	readFileTool, err := newReadFileTool()
+	readFileTool, err := newReadFileTool(rootCfg.Name)
 	if err != nil {
 		return builtRoot{}, fmt.Errorf("create read_file tool: %w", err)
 	}
-	writeFileTool, err := newWriteFileTool()
+	writeFileTool, err := newWriteFileTool(rootCfg.Name)
 	if err != nil {
 		return builtRoot{}, fmt.Errorf("create write_file tool: %w", err)
 	}

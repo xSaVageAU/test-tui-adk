@@ -113,6 +113,7 @@ func (a *App) openSettingsMenu() {
 		{id: "highlight", title: "Highlight user messages", desc: onOff(a.highlightUser)},
 		{id: "stream", title: "Stream replies token-by-token", desc: onOff(a.streamReplies)},
 		{id: "hitl", title: "Tool approval style", desc: a.hitlMode.String() + " — select to cycle"},
+		{id: "permission", title: "Tool approval mode", desc: a.permissionMode.String() + " — select to cycle"},
 	}
 	a.openMenu(paletteSettings, "Settings", items)
 }
@@ -186,23 +187,24 @@ func (a *App) toggleSetting(id string) {
 		a.streamReplies = !a.streamReplies
 	case "hitl":
 		a.hitlMode = a.hitlMode.next()
+	case "permission":
+		a.permissionMode = a.permissionMode.next()
 	}
 	a.persistSettings()
 	a.refreshTranscript()
 }
 
-// persistSettings writes the current UI toggles to settings.json,
-// preserving whatever Agent section is already there — that one's
-// hand-edited by the user (see internal/settings), never touched by
-// this app. Best-effort, same reasoning as SaveAPIKey in internal/adk:
-// there's nowhere safe to report a write failure from inside the TUI,
-// and the worst case is just that a toggle doesn't survive a restart.
+// persistSettings writes the current UI toggles to settings.json.
+// Best-effort, same reasoning as SaveAPIKey in internal/adk: there's
+// nowhere safe to report a write failure from inside the TUI, and the
+// worst case is just that a toggle doesn't survive a restart.
 func (a *App) persistSettings() {
 	s := settings.Load()
 	s.UI = settings.UISettings{
-		HighlightUser: a.highlightUser,
-		StreamReplies: a.streamReplies,
-		HITLMode:      a.hitlMode.String(),
+		HighlightUser:  a.highlightUser,
+		StreamReplies:  a.streamReplies,
+		HITLMode:       a.hitlMode.String(),
+		PermissionMode: a.permissionMode.String(),
 	}
 	_ = settings.Save(s)
 }

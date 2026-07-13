@@ -35,6 +35,14 @@ type keyMap struct {
 	// not paging a static document.
 	ScrollUp   key.Binding
 	ScrollDown key.Binding
+
+	// AutoAccept cycles the tool-approval permission mode (normal <->
+	// full-auto — see permissions.go) from anywhere, including mid-
+	// typing — shift+tab rather than a letter/ctrl combo specifically to
+	// avoid colliding with anything the textarea or a common terminal
+	// text-editing muscle-memory shortcut (ctrl+a, ctrl+k, ...) would
+	// otherwise claim.
+	AutoAccept key.Binding
 }
 
 var keys = keyMap{
@@ -66,12 +74,16 @@ var keys = keyMap{
 	ScrollDown: key.NewBinding(
 		key.WithKeys("pgdown"),
 	),
+	AutoAccept: key.NewBinding(
+		key.WithKeys("shift+tab"),
+		key.WithHelp("shift+tab", "auto-accept"),
+	),
 }
 
 // ShortHelp and FullHelp satisfy bubbles/help.KeyMap so the footer help
 // line can be generated from the same bindings Update() switches on.
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{keys.Send, keys.Commands, keys.ScrollUp, keys.Quit}
+	return []key.Binding{keys.Send, keys.Commands, keys.ScrollUp, keys.AutoAccept, keys.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {

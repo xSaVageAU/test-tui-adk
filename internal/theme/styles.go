@@ -15,12 +15,17 @@ type Styles struct {
 	// separating it from the chat below. HeaderSession is the one piece
 	// on that line that does carry a background — a highlighted badge —
 	// to set the session id apart from the plain agent/status text.
-	Header        lipgloss.Style
-	HeaderRule    lipgloss.Style
-	HeaderTitle   lipgloss.Style
-	HeaderAgent   lipgloss.Style
-	HeaderSession lipgloss.Style
-	HeaderStatus  func(status StatusKind) lipgloss.Style
+	// HeaderAutoBadge is the same treatment for the "auto-accept" badge,
+	// shown only while that permission mode is active — Warning-colored
+	// (same weight as ToolConfirmPending) since it's flagging that a
+	// safety check is relaxed, not just informational.
+	Header          lipgloss.Style
+	HeaderRule      lipgloss.Style
+	HeaderTitle     lipgloss.Style
+	HeaderAgent     lipgloss.Style
+	HeaderSession   lipgloss.Style
+	HeaderAutoBadge lipgloss.Style
+	HeaderStatus    func(status StatusKind) lipgloss.Style
 
 	// Chat viewport. MessageSystem is the plain, quiet variant (only used
 	// for the empty-state placeholder); MessageEvent is the badge shown
@@ -144,6 +149,12 @@ func New(t Theme) Styles {
 	s.HeaderSession = lipgloss.NewStyle().
 		Background(t.Highlight).
 		Foreground(t.Accent).
+		Bold(true).
+		Padding(0, 1)
+
+	s.HeaderAutoBadge = lipgloss.NewStyle().
+		Background(t.Warning).
+		Foreground(t.TextOnFill).
 		Bold(true).
 		Padding(0, 1)
 

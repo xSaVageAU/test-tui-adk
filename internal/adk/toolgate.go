@@ -12,6 +12,8 @@ import (
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/model"
 	"google.golang.org/adk/v2/tool"
+
+	"tui-testing/internal/settings"
 )
 
 // This file exists because ADK dispatches every function call in a
@@ -265,4 +267,121 @@ func (g *gatedTool) Run(ctx agent.Context, args any) (map[string]any, error) {
 	}
 	release()
 	return result, err
+}
+
+// ProcessRequest must be overridden, not left to promote through to the
+// wrapped tool: functiontool.ProcessRequest calls the internal
+// toolutils.PackTool(req, f), which registers *its own receiver* — i.e.
+// the innermost raw tool — into req.Tools, the map ADK's flow later
+// turns into the actual execution dict (see base_flow.go's "tools" map
+// built from req.Tools around its handleFunctionCalls call sites). Left
+// unoverridden, every wrapper in this file would be silently bypassed
+// for real dispatch — Declaration/Name would still work as promoted,
+// but Run would never be reached at all, which is exactly what
+// happened: this app's whole resource-conflict gate, and later
+// confirmGatedTool, were built and unit-tested in isolation but never
+// actually exercised by a live tool call until this was caught by a
+// direct end-to-end check (see [[tool-call-concurrency]] in memory).
+// The fix: call the wrapped tool's ProcessRequest first (it still does
+// the real work of populating req.Config/the schema), then overwrite
+// req.Tools[name] to point at this wrapper instead.
+func (g *gatedTool) ProcessRequest(ctx agent.Context, req *model.LLMRequest) error {
+	if err := g.funcTool.ProcessRequest(ctx, req); err != nil {
+		return err
+	}
+	req.Tools[g.Name()] = g
+	return nil
+}
+
+// confirmGatedTool wraps a tool.Tool so whether it actually asks for
+// human confirmation is decided fresh on every call, instead of being
+// fixed at construction time via functiontool.Config.RequireConfirmation
+// — ADK's own RequireConfirmationProvider hook can't do this, since its
+// signature (func(TArgs) bool) never receives agent.Context, so it can
+// neither read the active permission mode nor tell a root call apart
+// from a sub-agent one. This wrapper can, because it sees ctx directly.
+//
+// Composition matters: confirmGated must wrap the *raw* tool, with
+// gated (resource-conflict serialization) wrapping *that* — i.e.
+// gated(confirmGated(t, ...), resources), never the other way around.
+// gatedTool.Run already knows how to hold a resource lock through a
+// paused confirmation (see its ErrConfirmationRequired handling above);
+// if confirmGated wrapped the outside instead, it would return
+// ErrConfirmationRequired before the resource gate ever engaged, and
+// that hold-through-confirmation guarantee would never trigger.
+type confirmGatedTool struct {
+	funcTool
+	// normallyRequires is what "normal" mode uses for this specific
+	// tool — e.g. true for write_file, false for a read-only tool.
+	normallyRequires bool
+	// rootName is the app's actual root agent's configured name (see
+	// rootagent.go) — a call whose ctx.AgentName() doesn't match it is
+	// happening inside a sub-agent's own disposable run, which can never
+	// resolve a confirmation at all (see this file's package doc and
+	// [[adk-multi-agent-composition]] in memory), so it always
+	// auto-accepts regardless of the active permission mode.
+	// AgentName(), not Agent().Name() — agent.Context's Agent() is
+	// deliberately stubbed to nil for a tool context (confirmed in
+	// agent/tool_context_wrapper.go: "Agent() is not supported for tool
+	// context", logged and returns nil, which panics on .Name()).
+	// AgentName() is the one ADK actually forwards correctly here.
+	rootName string
+}
+
+// confirmGated wraps t so a confirmation is requested before it runs
+// according to the active permission mode (see internal/settings'
+// PermissionMode) — full-auto never confirms, normal uses
+// normallyRequires. A sub-agent's own tool calls always auto-accept
+// unconditionally, as a stopgap until sub-agents can participate in
+// HITL for real. Panics if t isn't built the way every tool in this
+// package is (via functiontool.New) — a programmer error to catch
+// immediately, not a runtime condition.
+func confirmGated(t tool.Tool, normallyRequires bool, rootName string) tool.Tool {
+	ft, ok := t.(funcTool)
+	if !ok {
+		panic(fmt.Sprintf("adk: confirmGated: %q does not implement the expected function-tool interface", t.Name()))
+	}
+	return &confirmGatedTool{funcTool: ft, normallyRequires: normallyRequires, rootName: rootName}
+}
+
+func (c *confirmGatedTool) Run(ctx agent.Context, args any) (map[string]any, error) {
+	// ctx.ToolConfirmation() being non-nil means a decision already
+	// exists for this call (we requested one below on an earlier pass,
+	// and the human has since answered) — delegate straight to the
+	// wrapped tool, whose own Run checks the same value and honors an
+	// approval or rejection accordingly. Nothing left for this wrapper
+	// to decide on a resumed call.
+	if ctx.ToolConfirmation() == nil && c.requiresConfirmation(ctx.AgentName(), settings.Load().UI.PermissionMode) {
+		hint := fmt.Sprintf("Please approve or reject the tool call %s() by responding with a FunctionResponse with an expected ToolConfirmation payload.", c.Name())
+		if err := ctx.RequestConfirmation(hint, nil); err != nil {
+			return nil, err
+		}
+		ctx.Actions().SkipSummarization = true
+		return nil, fmt.Errorf("error tool %q %w", c.Name(), tool.ErrConfirmationRequired)
+	}
+	return c.funcTool.Run(ctx, args)
+}
+
+// ProcessRequest is overridden for the same reason gatedTool's is — see
+// gatedTool.ProcessRequest's doc comment for the full explanation.
+func (c *confirmGatedTool) ProcessRequest(ctx agent.Context, req *model.LLMRequest) error {
+	if err := c.funcTool.ProcessRequest(ctx, req); err != nil {
+		return err
+	}
+	req.Tools[c.Name()] = c
+	return nil
+}
+
+// requiresConfirmation is pure decision logic, deliberately taking the
+// current agent's name and the active permission mode as plain values
+// rather than agent.Context/a settings.Load() call inside it — keeps
+// this testable without needing to fake ADK's context interface.
+func (c *confirmGatedTool) requiresConfirmation(currentAgentName, mode string) bool {
+	if currentAgentName != c.rootName {
+		return false
+	}
+	if mode == settings.ModeFullAuto {
+		return false
+	}
+	return c.normallyRequires
 }
