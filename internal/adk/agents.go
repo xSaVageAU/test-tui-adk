@@ -2,6 +2,7 @@ package adk
 
 import (
 	"fmt"
+	"strings"
 
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/agent/llmagent"
@@ -12,8 +13,8 @@ import (
 
 const (
 	// AgentName is the root agent's name — the only agent that ever
-	// speaks; session.Event.Author is always this, since the specialists
-	// below are consulted via agent-as-tool (agenttool.New), not transfer
+	// speaks; session.Event.Author is always this, since specialists are
+	// consulted via agent-as-tool (agenttool.New), not transfer
 	// (agent.Config.SubAgents) — the root calls them like a function and
 	// stays in control, rather than handing the conversation off to a
 	// different visible identity. Exported so callers (the boot banner's
@@ -21,91 +22,78 @@ const (
 	// without duplicating the string.
 	AgentName = "assistant"
 
-	researchAgentName = "research"
-	coderAgentName    = "coder"
-	plannerAgentName  = "planner"
-
-	rootInstruction = "You are the front-line assistant embedded in a terminal chat UI test harness. " +
+	// rootInstructionBase is the root agent's instruction — the only
+	// agent still defined in code; every specialist is entirely
+	// config-discovered (see subagents.go), with no hardcoded defaults.
+	// rootInstructionFor appends whatever specialists actually exist to
+	// this base text, so the root always knows what it can currently
+	// consult even though that set can grow, shrink, or start out empty
+	// with no code change.
+	rootInstructionBase = "You are the front-line assistant embedded in a terminal chat UI test harness. " +
 		"Keep replies short — this is a test harness for the UI, not a place for long essays. " +
 		"You have a list_files tool for browsing the working directory; use it whenever it's relevant. " +
-		"You can consult three specialists via tool calls when a request clearly fits their focus: research " +
-		"(reading code/docs, answering questions), coder (writing/editing code), and planner (breaking work " +
-		"into steps). Incorporate what they tell you into your own reply — you're still the one answering " +
-		"the user. Handle general requests yourself rather than consulting a specialist unnecessarily."
-
-	researchInstruction = "You are the research specialist in a terminal chat UI test harness: read code " +
-		"and docs, answer questions accurately and concisely. Use list_files to browse the working " +
-		"directory when relevant. Keep replies short."
-
-	coderInstruction = "You are the coding specialist in a terminal chat UI test harness: help write and " +
-		"edit code, explain snippets, suggest fixes. Use list_files to browse the working directory when " +
-		"relevant. Keep replies short."
-
-	plannerInstruction = "You are the planning specialist in a terminal chat UI test harness: break " +
-		"requests down into a clear, ordered list of steps. Keep replies short."
+		"You can consult specialists via tool calls when a request clearly fits their focus. Incorporate " +
+		"what they tell you into your own reply — you're still the one answering the user. Handle general " +
+		"requests yourself rather than consulting a specialist unnecessarily."
 )
 
-// buildRootAgent assembles the whole agent tree: the root "assistant"
-// agent plus its three specialists (research, coder, planner), each
-// wrapped via agenttool.New so the root consults them like function
-// calls rather than transferring the conversation to them — see
-// AgentName's doc comment for why. listFilesTool is shared verbatim
-// across every agent that wants it (built once by the caller, since
-// functiontool.New's result isn't agent-specific state).
+// buildRootAgent assembles the root "assistant" agent (defined here in
+// code, the only agent that is) plus whatever specialists are discovered
+// under appdir's "subagents" directory (see subagents.go) — one
+// subdirectory per agent, holding an agent.json and an instruction.md. A
+// fresh install starts with zero specialists, not a hardcoded default
+// set; the root works fine on its own and gains whatever's added there.
+// Every discovered specialist is wrapped via agenttool.New so the root
+// consults it like a function call rather than transferring the
+// conversation to it — see AgentName's doc comment for why.
+// listFilesTool is shared verbatim across every agent that wants it and
+// is the only tool a sub-agent config can currently reference by name.
 func buildRootAgent(m model.LLM, listFilesTool tool.Tool) (agent.Agent, error) {
-	research, err := llmagent.New(llmagent.Config{
-		Name:        researchAgentName,
-		Model:       m,
-		Description: "Reads code and docs, answers questions.",
-		Instruction: researchInstruction,
-		Tools:       []tool.Tool{listFilesTool},
-	})
+	configs, err := loadSubAgentConfigs()
 	if err != nil {
-		return nil, fmt.Errorf("create research agent: %w", err)
+		return nil, fmt.Errorf("load sub-agent configs: %w", err)
 	}
 
-	coder, err := llmagent.New(llmagent.Config{
-		Name:        coderAgentName,
-		Model:       m,
-		Description: "Writes and edits code.",
-		Instruction: coderInstruction,
-		Tools:       []tool.Tool{listFilesTool},
-	})
+	toolRegistry := map[string]tool.Tool{"list_files": listFilesTool}
+	subAgents, err := buildSubAgents(m, toolRegistry, configs)
 	if err != nil {
-		return nil, fmt.Errorf("create coder agent: %w", err)
+		return nil, err
 	}
 
-	planner, err := llmagent.New(llmagent.Config{
-		Name:        plannerAgentName,
-		Model:       m,
-		Description: "Breaks work into steps.",
-		Instruction: plannerInstruction,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create planner agent: %w", err)
+	tools := make([]tool.Tool, 0, len(subAgents)+1)
+	tools = append(tools, listFilesTool)
+	for _, sa := range subAgents {
+		tools = append(tools, agenttool.New(sa, nil))
 	}
 
 	root, err := llmagent.New(llmagent.Config{
 		Name:        AgentName,
 		Model:       m,
 		Description: "A general-purpose assistant for testing the TUI against a real LLM.",
-		Instruction: rootInstruction,
-		// agenttool.New wraps each specialist as an ordinary callable
-		// tool: the root calls it, gets a result back, and stays the one
-		// answering — no SubAgents, no transfer, no change in who's
-		// "speaking." nil Config leaves SkipSummarization false, so the
-		// root gets a chance to fold each specialist's answer into its
-		// own words rather than just relaying it verbatim.
-		Tools: []tool.Tool{
-			listFilesTool,
-			agenttool.New(research, nil),
-			agenttool.New(coder, nil),
-			agenttool.New(planner, nil),
-		},
+		Instruction: rootInstructionFor(subAgents),
+		Tools:       tools,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create agent: %w", err)
 	}
 
 	return root, nil
+}
+
+// rootInstructionFor appends a generated "Available specialists" list
+// (name plus description, in loadSubAgentConfigs' order) to
+// rootInstructionBase, so the root's instruction always reflects
+// whatever's actually in the subagents directory instead of naming
+// specialists that may not exist.
+func rootInstructionFor(subAgents []agent.Agent) string {
+	if len(subAgents) == 0 {
+		return rootInstructionBase
+	}
+	var b strings.Builder
+	b.WriteString(rootInstructionBase)
+	b.WriteString(" Available specialists:")
+	for _, sa := range subAgents {
+		fmt.Fprintf(&b, "\n- %s: %s", sa.Name(), sa.Description())
+	}
+	return b.String()
 }
