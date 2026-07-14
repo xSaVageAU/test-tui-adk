@@ -9,18 +9,22 @@ import (
 )
 
 // renderTopBar draws the fixed two-line panel pinned to the top of the
-// screen: a plain meta line (session id, active agent, status — in that
+// screen: a plain meta line (session id, active agent — in that
 // left-to-right order, plus an "auto-accept" badge when that permission
 // mode is active) followed by a solid horizontal rule separating it from
 // the chat below. No filled background panel and no platform branding —
 // just enough to orient you.
-func renderTopBar(s theme.Styles, width int, agent string, status theme.StatusKind, sessionID string, autoAccept bool) string {
+//
+// There used to be an "idle"/"thinking…" status word here too — removed
+// at the user's request (didn't like it, wants something else in its
+// place eventually). App.status/theme.StatusKind/Styles.HeaderStatus are
+// deliberately still tracked and left alone, not ripped out — they're
+// exactly the hook whatever replaces this will want to read.
+func renderTopBar(s theme.Styles, width int, agent, sessionID string, autoAccept bool) string {
 	parts := []string{
 		s.HeaderSession.Render(shortSessionID(sessionID)),
 		s.HeaderTitle.Render(" · "),
 		s.HeaderAgent.Render(agent),
-		s.HeaderTitle.Render(" · "),
-		s.HeaderStatus(status).Render(statusLabel(status)),
 	}
 	// Only shown while active — the common (normal-mode) case stays as
 	// uncluttered as it always was, and this is meant to be a "notice
@@ -47,15 +51,4 @@ func shortSessionID(id string) string {
 		id = id[:8]
 	}
 	return "sess_" + id
-}
-
-func statusLabel(status theme.StatusKind) string {
-	switch status {
-	case theme.StatusThinking:
-		return "thinking…"
-	case theme.StatusError:
-		return "error"
-	default:
-		return "idle"
-	}
 }

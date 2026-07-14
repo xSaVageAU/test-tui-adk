@@ -26,6 +26,7 @@ var commandSpecs = []commandSpec{
 	{Name: "settings", Desc: "Adjust settings"},
 	{Name: "key", Desc: "Set a provider API key"},
 	{Name: "agents", Desc: "Configure agent provider/model"},
+	{Name: "loader", Desc: "Choose the \"working\" animation"},
 }
 
 // commandQuery returns the text after a leading "/" in the input box, and
@@ -88,8 +89,10 @@ func (a *App) runCommand(name string) tea.Cmd {
 		a.openKeyProviderMenu()
 	case "agents":
 		a.openAgentsMenu()
+	case "loader":
+		return a.openLoaderMenu()
 	default:
-		a.systemMessage("Unknown command: /" + name + " — try /new, /sessions, /theme, /settings, /key, or /agents.")
+		a.systemMessage("Unknown command: /" + name + " — try /new, /sessions, /theme, /settings, /key, /agents, or /loader.")
 	}
 	return nil
 }
@@ -109,6 +112,35 @@ func (a *App) openThemeMenu() {
 		items[i] = paletteItem{id: name, title: name, desc: desc}
 	}
 	a.openMenu(paletteTheme, "Choose theme", items)
+}
+
+// openLoaderMenu is /loader's entry point — same live-preview shape as
+// /theme (see previewWorkingAnim/cancelMenu's paletteLoader case), but
+// also has to actually kick off the tick loop itself: unlike a real
+// turn, nothing else would ever call startWorkingAnim while just
+// browsing the list. Returns a tea.Cmd (openThemeMenu doesn't need to)
+// for exactly that reason.
+func (a *App) openLoaderMenu() tea.Cmd {
+	a.loaderMenuOrigin = workingAnimNames[a.workingAnim.variant]
+
+	items := make([]paletteItem, workingAnimCount)
+	for i, name := range workingAnimNames {
+		desc := ""
+		if name == a.loaderMenuOrigin {
+			desc = "current"
+		}
+		items[i] = paletteItem{id: name, title: name, desc: desc}
+	}
+	a.openMenu(paletteLoader, "Choose \"working\" animation", items)
+	return a.startWorkingAnim()
+}
+
+// previewWorkingAnim swaps the active variant immediately, without
+// waiting for the menu selection to be confirmed — same reasoning as
+// previewTheme, called on every highlight change while /loader has
+// focus (see handlePaletteKey).
+func (a *App) previewWorkingAnim(name string) {
+	a.workingAnim.variant = parseWorkingAnimVariant(name)
 }
 
 func (a *App) openSettingsMenu() {
@@ -150,6 +182,8 @@ func (a *App) cancelMenu() {
 	case paletteTheme:
 		a.themeMgr.Set(a.themeMenuOrigin)
 		a.applyTheme()
+	case paletteLoader:
+		a.workingAnim.variant = parseWorkingAnimVariant(a.loaderMenuOrigin)
 	case paletteKeyProvider:
 		a.dropPendingMessage()
 	case paletteTextInput:
@@ -190,6 +224,14 @@ func (a *App) confirmMenuSelection(id string) (bool, tea.Cmd) {
 	switch a.paletteKind {
 	case paletteTheme:
 		a.systemMessage("Theme set to " + id + ".")
+	case paletteLoader:
+		// Explicit rather than relying solely on previewWorkingAnim: if
+		// Enter is pressed on the very first row without ever arrowing,
+		// no highlight-change event (and so no preview call) ever fired
+		// for it.
+		a.workingAnim.variant = parseWorkingAnimVariant(id)
+		a.persistSettings()
+		a.systemMessage("Working animation set to " + id + ".")
 	case paletteSettings:
 		a.toggleSetting(id)
 	case paletteSessions:
@@ -246,6 +288,7 @@ func (a *App) persistSettings() {
 		HITLMode:       a.hitlMode.String(),
 		PermissionMode: a.permissionMode.String(),
 		VerboseTools:   a.verboseTools,
+		WorkingAnim:    workingAnimNames[a.workingAnim.variant],
 	}
 	_ = settings.Save(s)
 }

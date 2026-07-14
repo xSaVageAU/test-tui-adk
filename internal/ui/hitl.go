@@ -175,14 +175,16 @@ func (a *App) resolveConfirmation(approved bool) tea.Cmd {
 		a.messages[pc.msgIndex].ToolPending = false
 	}
 	a.status = theme.StatusThinking
+	a.workingLabel = "thinking"
 	a.followTranscript()
 
 	backend := a.backend
-	return func() tea.Msg {
+	animCmd := a.startWorkingAnim()
+	return tea.Batch(animCmd, func() tea.Msg {
 		ch, err := backend.RespondToConfirmation(context.Background(), a.sessionID, pc.id, approved)
 		if err != nil {
 			return agentReplyMsg{err: err}
 		}
 		return streamStartMsg{ch: ch}
-	}
+	})
 }

@@ -45,6 +45,12 @@ type UISettings struct {
 	// list_files results are routine, not something worth reading in
 	// full on every call.
 	VerboseTools bool `json:"verboseTools"`
+	// WorkingAnim is the active "agent is working" animation's name (see
+	// internal/ui/workinganim.go's workingAnimNames) — same
+	// name-as-persisted-id convention the theme picker already uses. ""
+	// (an older settings.json, or one that's simply never been changed)
+	// falls back to the first variant.
+	WorkingAnim string `json:"workingAnim"`
 }
 
 // ModeNormal/ModeFullAuto are PermissionMode's only two valid values —

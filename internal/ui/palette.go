@@ -26,6 +26,7 @@ const (
 	paletteAgents        // /agents' top-level list: root + every sub-agent — see agentsmenu.go
 	paletteAgentDetail   // /agents' per-agent list: Provider / Model — see agentsmenu.go
 	paletteAgentProvider // /agents' provider picker for whichever agent is selected — see agentsmenu.go
+	paletteLoader        // /loader: pick the "agent is working" animation — see workinganim.go
 )
 
 // paletteItem is a single row in any popup menu (themes, settings). id is

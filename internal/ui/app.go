@@ -95,11 +95,28 @@ type App struct {
 	inputLines   int // current wrapped height of the input box, [minInputLines, maxInputLines]
 	help         help.Model
 
-	paletteKind     paletteKind
-	paletteTitle    string
-	paletteList     list.Model
-	keyInput        textinput.Model // backs paletteTextInput; see keyinput.go
-	themeMenuOrigin string          // theme active before /theme opened, for Esc to revert to
+	paletteKind      paletteKind
+	paletteTitle     string
+	paletteList      list.Model
+	keyInput         textinput.Model // backs paletteTextInput; see keyinput.go
+	themeMenuOrigin  string          // theme active before /theme opened, for Esc to revert to
+	loaderMenuOrigin string          // working-anim variant active before /loader opened, for Esc to revert to
+
+	// workingAnim is the "agent is working" animation shown above the
+	// input box — see workinganim.go. workingAnimActive tracks whether
+	// its tick loop is currently running, so dispatchToBackend and
+	// resolveConfirmation (the two moments a turn starts) can both call
+	// startWorkingAnim unconditionally without risking two overlapping
+	// tick chains.
+	workingAnim       workingAnimState
+	workingAnimActive bool
+	// workingLabel is Orbit's center text (other variants ignore it) —
+	// "thinking" for most of a turn, "using <tool>" while a tool call is
+	// actually in flight, so it reflects the turn's real phase instead
+	// of a fixed word. Set at turn start (dispatchToBackend,
+	// resolveConfirmation) and on every ToolCall/ToolResult chunk (see
+	// Update).
+	workingLabel string
 
 	// textPopupKind/textPopupLabel/textPopupProvider back paletteTextInput
 	// (see keyinput.go) — one popup shared by /key's masked API-key field
@@ -202,6 +219,8 @@ func NewApp(cfg AppConfig) *App {
 		listAgents:       cfg.ListAgents,
 		setAgentProvider: cfg.SetAgentProvider,
 		setAgentModel:    cfg.SetAgentModel,
+		workingAnim:      newWorkingAnimState(parseWorkingAnimVariant(uiSettings.WorkingAnim)),
+		workingLabel:     "thinking",
 	}
 	a.help.ShortSeparator = "  "
 	return a
@@ -221,6 +240,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		return a.handleKey(msg)
+
+	case workingAnimTickMsg:
+		a.workingAnim.advance()
+		if !a.workingAnimShouldRun() {
+			a.workingAnimActive = false
+			return a, nil
+		}
+		return a, workingAnimTick()
 
 	case agentReplyMsg:
 		if msg.err != nil {
@@ -273,8 +300,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.insertConfirmMessage(msg.chunk.Confirmation)
 		case msg.chunk.ToolCall != nil:
 			a.upsertToolMessage(msg.chunk.ToolCall.ID, msg.chunk.ToolCall.Name, msg.chunk.ToolCall.Args, toolStatusRunning, false)
+			a.workingLabel = "using " + msg.chunk.ToolCall.Name
 		case msg.chunk.ToolResult != nil:
 			a.completeToolMessage(msg.chunk.ToolResult.ID, msg.chunk.ToolResult.Name, msg.chunk.ToolResult.Result)
+			a.workingLabel = "thinking"
 		case msg.chunk.Usage != nil:
 			a.accumulateUsage(msg.chunk.Usage)
 		case msg.chunk.FinishReason != "":
@@ -452,12 +481,18 @@ func (a *App) handlePaletteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	a.paletteList, cmd = a.paletteList.Update(msg)
 
-	// Live-preview: whatever's highlighted in the /theme menu is applied
-	// immediately, not just on confirm, so navigating repaints the whole
-	// app (this popup included) with the candidate theme.
-	if a.paletteKind == paletteTheme {
+	// Live-preview: whatever's highlighted in the /theme or /loader menu
+	// is applied immediately, not just on confirm, so navigating repaints
+	// the whole app (this popup included) with the candidate theme, or
+	// swaps which animation is actively ticking above the input box.
+	switch a.paletteKind {
+	case paletteTheme:
 		if item, ok := a.paletteList.SelectedItem().(paletteItem); ok {
 			a.previewTheme(item.id)
+		}
+	case paletteLoader:
+		if item, ok := a.paletteList.SelectedItem().(paletteItem); ok {
+			a.previewWorkingAnim(item.id)
 		}
 	}
 
@@ -510,26 +545,28 @@ func (a *App) sendMessage(text string) tea.Cmd {
 // handler resuming a held message.
 func (a *App) dispatchToBackend(text string) tea.Cmd {
 	a.status = theme.StatusThinking
+	a.workingLabel = "thinking"
 	a.turnUsage, a.turnFinishReason = nil, ""
 	backend := a.backend
+	animCmd := a.startWorkingAnim()
 
 	if !a.streamReplies {
-		return func() tea.Msg {
+		return tea.Batch(animCmd, func() tea.Msg {
 			reply, err := backend.Send(context.Background(), a.sessionID, text)
 			if err != nil {
 				return agentReplyMsg{err: err}
 			}
 			return agentReplyMsg{text: reply}
-		}
+		})
 	}
 
-	return func() tea.Msg {
+	return tea.Batch(animCmd, func() tea.Msg {
 		ch, err := backend.Stream(context.Background(), a.sessionID, text)
 		if err != nil {
 			return agentReplyMsg{err: err}
 		}
 		return streamStartMsg{ch: ch}
-	}
+	})
 }
 
 type agentReplyMsg struct {
@@ -818,7 +855,7 @@ func (a *App) layout() {
 	if len(a.suggestMatches) > 0 {
 		suggestHeight = len(a.suggestMatches) + 2 // border top/bottom
 	}
-	vpHeight := max(a.height-topBarHeight-suggestHeight-inputBoxHeight-footerHeight, 0)
+	vpHeight := max(a.height-topBarHeight-workingAnimHeight-suggestHeight-inputBoxHeight-footerHeight, 0)
 
 	if a.viewport.Width == 0 {
 		a.viewport = viewport.New(a.width, vpHeight)
@@ -848,10 +885,14 @@ func (a *App) View() string {
 		return ""
 	}
 
-	topBar := renderTopBar(a.styles, a.width, a.agentName, a.status, a.sessionID, a.permissionMode == permissionFullAuto)
+	topBar := renderTopBar(a.styles, a.width, a.agentName, a.sessionID, a.permissionMode == permissionFullAuto)
 	body := a.viewport.View()
 	if sticky := a.stickyPromptOverlay(); sticky != "" {
 		body = overlay(body, sticky, 0, 0, a.viewport.Width)
+	}
+	workingAnimBlock := blankWorkingAnim()
+	if a.workingAnimShouldRun() {
+		workingAnimBlock = a.workingAnim.render(a.styles.Theme, a.width, a.workingLabel)
 	}
 	inputBar := renderInputBar(a.styles, a.input, a.width, a.inputLines, true)
 	footer := a.styles.Help.Render(a.help.View(keys))
@@ -860,7 +901,7 @@ func (a *App) View() string {
 	if len(a.suggestMatches) > 0 {
 		parts = append(parts, renderSuggestions(a.styles, a.suggestMatches, a.suggestIndex, a.width))
 	}
-	parts = append(parts, inputBar, footer)
+	parts = append(parts, workingAnimBlock, inputBar, footer)
 
 	frame := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
