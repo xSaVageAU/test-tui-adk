@@ -56,13 +56,6 @@ type App struct {
 	width, height int
 	ready         bool
 
-	// agentName is the backend's agent name, shown in the header — fixed
-	// for the process lifetime, set once from AppConfig.AgentName. There's
-	// only ever one voice in the conversation (the backend may consult
-	// specialists internally via agent-as-tool, but that's invisible at
-	// this layer — see ui.StreamChunk), so unlike most of what's in this
-	// struct, this never changes after NewApp.
-	agentName     string
 	status        theme.StatusKind
 	messages      []ChatMessage
 	highlightUser bool // experimental: backdrop highlight behind user messages
@@ -203,9 +196,6 @@ type AppConfig struct {
 	NewBackend BackendFactory
 	// ModelName is shown in the boot banner. "" renders as "unknown".
 	ModelName string
-	// AgentName is the backend's agent name, shown in the header. ""
-	// renders as "unknown".
-	AgentName string
 	// Specialists is the name of every sub-agent the backend loaded at
 	// startup (empty if none), shown in the boot banner. Meaningless
 	// without a Backend — leave nil when Backend is nil.
@@ -250,7 +240,6 @@ func NewApp(cfg AppConfig) *App {
 			Theme:       mgr.Current().Name,
 			Specialists: cfg.Specialists,
 		},
-		agentName:        cfg.AgentName,
 		contextWindow:    cfg.ContextWindow,
 		status:           theme.StatusIdle,
 		highlightUser:    uiSettings.HighlightUser,
@@ -1015,7 +1004,7 @@ func (a *App) View() string {
 		return ""
 	}
 
-	topBar := renderTopBar(a.styles, a.width, a.agentName, a.sessionID, a.permissionMode == permissionFullAuto, a.contextUsed, a.contextWindow)
+	topBar := renderTopBar(a.styles, a.width, a.sessionID, a.contextUsed, a.contextWindow)
 	body := a.viewport.View()
 	if sticky := a.stickyPromptOverlay(); sticky != "" {
 		body = overlay(body, sticky, 0, 0, a.viewport.Width)

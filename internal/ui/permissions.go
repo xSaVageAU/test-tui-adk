@@ -47,8 +47,9 @@ func parsePermissionMode(s string) permissionMode {
 // picking "Tool approval mode" in /settings (toggleSetting("permission")
 // does the identical flip+persist), just reachable instantly from
 // anywhere instead of needing to open the menu first. No system message
-// on top of that — the top-bar badge (see renderTopBar) is the intended
-// feedback; a chat-log entry on every toggle was noisy.
+// on top of that — the help-footer's own shift+tab badge (see footer.go's
+// renderHelpFooter) already recolors to reflect the new state; a
+// chat-log entry on every toggle was noisy.
 func (a *App) toggleAutoAccept() {
 	a.toggleSetting("permission")
 }

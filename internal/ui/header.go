@@ -10,12 +10,19 @@ import (
 )
 
 // renderTopBar draws the fixed two-line panel pinned to the top of the
-// screen: a plain meta line (session id, active agent — in that
-// left-to-right order, plus an "auto-accept" badge when that permission
-// mode is active) on the left, a context-window usage bar (see
+// screen: the session id on the left, a context-window usage bar (see
 // renderContextBar) on the right, followed by a solid horizontal rule
 // separating it from the chat below. No filled background panel and no
 // platform branding — just enough to orient you.
+//
+// The active agent's name and the "auto-accept" badge used to live here
+// too — removed at the user's request now that auto-accept has its own
+// help-footer badge (see footer.go's renderHelpFooter) that already
+// flips color while the mode is active, making a second indicator here
+// redundant. The agent's name isn't shown anywhere else in the running
+// UI now (with agent-as-tool as the only delegation pattern there's
+// exactly one voice in every conversation regardless) — see /agents for
+// the configured name if it's ever needed.
 //
 // There used to be an "idle"/"thinking…" status word here too — removed
 // at the user's request (didn't like it, wants something else in its
@@ -25,19 +32,8 @@ import (
 // "reasoning" badge was tried here first, but it belonged next to the
 // transcript's per-message "agent" label instead — see chat.go's
 // renderMessage — not here.)
-func renderTopBar(s theme.Styles, width int, agent, sessionID string, autoAccept bool, contextUsed, contextWindow int) string {
-	parts := []string{
-		s.HeaderSession.Render(shortSessionID(sessionID)),
-		s.HeaderTitle.Render(" · "),
-		s.HeaderAgent.Render(agent),
-	}
-	// Only shown while active — the common (normal-mode) case stays as
-	// uncluttered as it always was, and this is meant to be a "notice
-	// something's different" flag, not a permanent fixture.
-	if autoAccept {
-		parts = append(parts, s.HeaderTitle.Render(" · "), s.HeaderAutoBadge.Render("AUTO-ACCEPT"))
-	}
-	meta := lipgloss.JoinHorizontal(lipgloss.Left, parts...)
+func renderTopBar(s theme.Styles, width int, sessionID string, contextUsed, contextWindow int) string {
+	meta := s.HeaderSession.Render(shortSessionID(sessionID))
 
 	// s.Header.Width(width-2) below applies its own Padding(0,1) inside
 	// that width, so the content area actually available for meta+bar is

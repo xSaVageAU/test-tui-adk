@@ -71,11 +71,12 @@ func main() {
 	var modelName string
 	var contextWindow int
 
-	// Read independently of whether a connection ever succeeds — the
-	// header/boot banner should show the configured name even before
-	// (or without) a working API key, same as list_files et al. being
-	// discoverable without one.
-	agentName, err := adk.RootAgentName()
+	// Read independently of whether a connection ever succeeds, purely to
+	// fail fast on a broken config even before (or without) a working API
+	// key — same as list_files et al. being discoverable without one. The
+	// name itself isn't used for display anywhere anymore (see
+	// ui/header.go's renderTopBar), just the error.
+	_, err := adk.RootAgentName()
 	if err != nil {
 		note = "Could not load the root agent's config: " + err.Error()
 	}
@@ -109,7 +110,6 @@ func main() {
 		BackendNote:      note,
 		NewBackend:       newBackend,
 		ModelName:        modelName,
-		AgentName:        agentName,
 		Specialists:      specialists,
 		ContextWindow:    contextWindow,
 		ListAgents:       listAgents,

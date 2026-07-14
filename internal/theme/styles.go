@@ -11,24 +11,19 @@ type Styles struct {
 	// App chrome
 	App lipgloss.Style
 
-	// Top bar: a plain (no background panel) meta line plus a solid rule
-	// separating it from the chat below. HeaderSession is the one piece
-	// on that line that does carry a background — a highlighted badge —
-	// to set the session id apart from the plain agent/status text.
-	// HeaderAutoBadge is the same treatment for the "auto-accept" badge,
-	// shown only while that permission mode is active — Warning-colored
-	// (same weight as ToolConfirmPending) since it's flagging that a
-	// safety check is relaxed, not just informational. HeaderContextBar
-	// colors the context-window usage bar on the top bar's right side
-	// (see header.go's renderContextBar) by how full it is — same
-	// three-tier severity scale as HeaderStatus (Success/Warning/Error),
-	// just keyed by a 0-1 fraction instead of a StatusKind.
+	// Top bar: a plain (no background panel) meta line (just the session
+	// id — see header.go's renderTopBar) plus a solid rule separating it
+	// from the chat below. HeaderSession carries a background — a
+	// highlighted badge — to set the session id apart from plain text.
+	// HeaderContextBar colors the context-window usage bar on the top
+	// bar's right side (see header.go's renderContextBar) by how full it
+	// is — same three-tier severity scale as HeaderStatus (Success/
+	// Warning/Error), just keyed by a 0-1 fraction instead of a
+	// StatusKind.
 	Header           lipgloss.Style
 	HeaderRule       lipgloss.Style
 	HeaderTitle      lipgloss.Style
-	HeaderAgent      lipgloss.Style
 	HeaderSession    lipgloss.Style
-	HeaderAutoBadge  lipgloss.Style
 	HeaderStatus     func(status StatusKind) lipgloss.Style
 	HeaderContextBar func(frac float64) lipgloss.Style
 
@@ -38,7 +33,7 @@ type Styles struct {
 	// those want to stand out, not blend in. ReasoningBadge/ReasoningNote
 	// sit next to the "agent" label (see chat.go's renderMessage) —
 	// ReasoningBadge is a filled, eye-catching treatment (same weight as
-	// ToolCallName/HeaderAutoBadge) shown only while the model is
+	// ToolCallName/ToolConfirmPending) shown only while the model is
 	// actively sending reasoning/thinking output (see App.reasoning);
 	// once it's done, ReasoningNote is what's left behind permanently
 	// ("thought for Xs") — quiet (just TextFaint, no fill), since a
@@ -71,8 +66,8 @@ type Styles struct {
 	// blockquote marker) with the call and its result grouped tight
 	// beneath it (or, in lean mode, on the same line) — see renderTool
 	// in chat.go. ToolCallName is a filled badge, same Warning-colored
-	// treatment as HeaderAutoBadge/ToolConfirmPending, so a tool call
-	// reads as a distinct event at a glance rather than just bold text
+	// treatment as ToolConfirmPending, so a tool call reads as a
+	// distinct event at a glance rather than just bold text
 	// blending into the surrounding gutter.
 	ToolGutter   lipgloss.Style // the "▏" bar itself
 	ToolCallName lipgloss.Style // filled badge around the tool name
@@ -134,10 +129,11 @@ type Styles struct {
 	// footer.go's renderHelpFooter) — one shared background per badge
 	// (dim by default, a quiet grouping cue rather than something meant
 	// to compete with the chat above it; the same Warning-filled
-	// treatment as HeaderAutoBadge/ToolConfirmPending while a toggle
-	// bind's own setting — AutoAccept, VerboseTools — is currently on, so
-	// the footer doubles as a quiet indicator of which toggles are
-	// active). Key renders a shade darker than Desc within that shared
+	// treatment as ToolConfirmPending while a toggle bind's own setting —
+	// AutoAccept, VerboseTools — is currently on, so the footer doubles
+	// as a quiet indicator of which toggles are active — the only such
+	// indicator now that the top bar no longer shows one). Key renders a
+	// shade darker than Desc within that shared
 	// fill — see HelpBadgeStyle's own doc comment — which is the only
 	// thing distinguishing the two; a from-scratch two-tone (separate
 	// background per half) was tried and looked worse, not better, per
@@ -185,19 +181,9 @@ func New(t Theme) Styles {
 	s.HeaderTitle = lipgloss.NewStyle().
 		Foreground(t.TextFaint)
 
-	s.HeaderAgent = lipgloss.NewStyle().
-		Foreground(t.Accent).
-		Bold(true)
-
 	s.HeaderSession = lipgloss.NewStyle().
 		Background(t.Highlight).
 		Foreground(t.Accent).
-		Bold(true).
-		Padding(0, 1)
-
-	s.HeaderAutoBadge = lipgloss.NewStyle().
-		Background(t.Warning).
-		Foreground(t.TextOnFill).
 		Bold(true).
 		Padding(0, 1)
 

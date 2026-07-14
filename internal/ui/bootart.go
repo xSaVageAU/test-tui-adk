@@ -22,8 +22,8 @@ const bootMaxWidth = 60
 // live status widget in its own right (that's what the top bar is for).
 // There's no Agent field: with agent-as-tool as the only delegation
 // pattern, there's exactly one voice in every conversation, so naming it
-// here would just be trivia, not information — the header already shows
-// it once, which is enough.
+// here would just be trivia, not information — see /agents for the
+// configured name if it's ever needed.
 type BootInfo struct {
 	Model       string // "" if unknown
 	Theme       string

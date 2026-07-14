@@ -133,11 +133,12 @@ func (c *Client) ContextWindow() int {
 }
 
 // RootAgentName reads just the root agent's configured name, without
-// building a model or needing an API key — main.go uses this to show
-// the right name in the header/boot banner even before a connection
-// exists (or if one never succeeds). Seeds the default config the same
-// way buildRootAgent's own load does, so calling this before New is
-// always safe and never conjures a different name than New would use.
+// building a model or needing an API key — main.go calls this at
+// startup purely to fail fast on a broken root agent.json even before
+// (or without) a working API key or connection. Seeds the default
+// config the same way buildRootAgent's own load does, so calling this
+// before New is always safe and never conjures a different name than
+// New would use.
 func RootAgentName() (string, error) {
 	cfg, err := loadRootAgentConfig()
 	if err != nil {
