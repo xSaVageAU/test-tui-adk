@@ -23,18 +23,26 @@ const (
 // where a real backend would eventually feed messages in.
 //
 // Content is used by every role except RoleTool, which uses ToolName,
-// ToolArgs, and ToolStatus instead — structured data rather than a
-// pre-formatted string, so renderMessage can lay it out (and style the
-// name, args, and status differently) instead of just printing whatever
-// string it was handed. ToolStatus is the one field that gets mutated in
-// place as a call progresses — see App.upsertToolMessage.
+// ToolArgs, ToolStatus, and ToolResult instead — structured data rather
+// than a pre-formatted string, so renderMessage can lay it out (and
+// style the name, args, and status differently), and so a completed
+// call's result can be reformatted live when the verbose-tools setting
+// changes instead of the summary being baked in once at event time.
+// ToolStatus only ever holds a lifecycle sentinel now ("running…", a
+// pending-approval prompt, "approved"/"denied") — once a real result
+// arrives, ToolResult is what's set (see App.completeToolMessage) and
+// ToolStatus stops being read for that message. ToolResult stays nil
+// the whole time a call is in flight, including while paused on a HITL
+// confirmation — that's exactly what distinguishes "no result yet" from
+// "the tool legitimately returned an empty map".
 type ChatMessage struct {
 	Role        Role
 	Content     string
 	ToolName    string
 	ToolArgs    map[string]any
-	ToolStatus  string // e.g. "running…", the pending-approval text, or a result summary
-	ToolPending bool   // true only while ToolStatus is an approval request awaiting a decision
+	ToolStatus  string         // lifecycle sentinel only — see the type doc comment
+	ToolResult  map[string]any // nil until the call completes; see App.completeToolMessage
+	ToolPending bool           // true only while ToolStatus is an approval request awaiting a decision
 	At          time.Time
 
 	// Usage and FinishReason are meaningful only on RoleAgent messages —

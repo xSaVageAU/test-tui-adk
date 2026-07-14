@@ -117,6 +117,7 @@ func (a *App) openSettingsMenu() {
 		{id: "stream", title: "Stream replies token-by-token", desc: onOff(a.streamReplies)},
 		{id: "hitl", title: "Tool approval style", desc: a.hitlMode.String() + " — select to cycle"},
 		{id: "permission", title: "Tool approval mode", desc: a.permissionMode.String() + " — select to cycle"},
+		{id: "verbose", title: "Verbose tool output", desc: onOff(a.verboseTools)},
 	}
 	a.openMenu(paletteSettings, "Settings", items)
 }
@@ -226,6 +227,8 @@ func (a *App) toggleSetting(id string) {
 		a.hitlMode = a.hitlMode.next()
 	case "permission":
 		a.permissionMode = a.permissionMode.next()
+	case "verbose":
+		a.verboseTools = !a.verboseTools
 	}
 	a.persistSettings()
 	a.refreshTranscript()
@@ -242,6 +245,7 @@ func (a *App) persistSettings() {
 		StreamReplies:  a.streamReplies,
 		HITLMode:       a.hitlMode.String(),
 		PermissionMode: a.permissionMode.String(),
+		VerboseTools:   a.verboseTools,
 	}
 	_ = settings.Save(s)
 }

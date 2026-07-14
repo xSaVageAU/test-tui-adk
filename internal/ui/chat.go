@@ -20,7 +20,7 @@ import (
 // at, so PgUp/PgDn can jump viewport.YOffset straight to a prompt instead
 // of scrolling a fixed page height — cheap to compute here alongside the
 // render pass instead of re-walking the content separately.
-func renderTranscript(s theme.Styles, boot BootInfo, messages []ChatMessage, width int, highlightUser bool) (content string, userMsgLines []int) {
+func renderTranscript(s theme.Styles, boot BootInfo, messages []ChatMessage, width int, highlightUser, verboseTools bool) (content string, userMsgLines []int) {
 	var sb strings.Builder
 	bootBlock := renderBootArt(s, boot, width)
 	sb.WriteString(bootBlock)
@@ -49,7 +49,7 @@ func renderTranscript(s theme.Styles, boot BootInfo, messages []ChatMessage, wid
 		writeBlock(s.MessageSystem.Render("No messages yet — say something below."), false)
 	} else {
 		for _, m := range messages {
-			startLine := writeBlock(renderMessage(s, m, width, highlightUser), false)
+			startLine := writeBlock(renderMessage(s, m, width, highlightUser, verboseTools), false)
 			if m.Role == RoleUser {
 				userMsgLines = append(userMsgLines, startLine)
 			}
@@ -58,7 +58,7 @@ func renderTranscript(s theme.Styles, boot BootInfo, messages []ChatMessage, wid
 	return sb.String(), userMsgLines
 }
 
-func renderMessage(s theme.Styles, m ChatMessage, width int, highlightUser bool) string {
+func renderMessage(s theme.Styles, m ChatMessage, width int, highlightUser, verboseTools bool) string {
 	switch m.Role {
 	case RoleUser:
 		label := s.MessageUser.Render("you")
@@ -80,7 +80,7 @@ func renderMessage(s theme.Styles, m ChatMessage, width int, highlightUser bool)
 		}
 		return lipgloss.JoinVertical(lipgloss.Left, lines...)
 	case RoleTool:
-		return renderTool(s, m.ToolName, m.ToolArgs, m.ToolStatus, m.ToolPending, width)
+		return renderTool(s, m.ToolName, m.ToolArgs, m.ToolResult, m.ToolStatus, m.ToolPending, verboseTools, width)
 	default:
 		return s.MessageEvent.Render(m.Content)
 	}
@@ -92,41 +92,64 @@ func renderMessage(s theme.Styles, m ChatMessage, width int, highlightUser bool)
 const toolGutter = "▏ "
 
 // renderTool draws one tool invocation's whole lifecycle as a single
-// entry: "▏ toolName  key=value ..." (args rendered generically — plain
-// key=value, sorted by key since map iteration order isn't stable and
-// this re-renders on every keystroke — works for any tool, not just
-// list_files), plus a status line beneath it once there's anything to
-// report. That second line is the one thing that changes in place as a
-// call progresses from running to (optionally) awaiting approval to a
-// final result — see App.upsertToolMessage, which is what makes that
-// in-place update happen instead of a fresh entry appearing per event.
+// entry: "▏ [toolName]  <args>" (the name itself a filled badge — see
+// theme.Styles.ToolCallName — so a tool call reads as a distinct event
+// at a glance rather than blending into surrounding prose) plus a status
+// once there's anything to report. That status is the one thing that
+// changes in place as a call progresses from running to (optionally)
+// awaiting approval to a final result — see App.upsertToolMessage/
+// completeToolMessage, which is what makes that in-place update happen
+// instead of a fresh entry appearing per event.
 //
-// While pending is true, the status line renders as a full-width filled
-// badge rather than another quiet gutter line — feedback was that plain
-// colored text blended in too easily to notice a conversation was
-// blocked waiting on a decision. Once resolved it drops back to
-// gutter-line weight, same as a plain result, since at that point it's
-// just a record.
-func renderTool(s theme.Styles, name string, args map[string]any, status string, pending bool, width int) string {
+// verboseTools controls both the detail level and the layout. false (the
+// default): args and status/result are tailored one-line summaries for
+// this app's own built-in tools (formatToolArgs/formatToolResult),
+// appended to the *same* line as the call — the whole invocation reads
+// as one row whenever it reasonably can. true: args render as plain,
+// generic key=value pairs (formatKV) and the result via the generic
+// summarizeResult, each on their own wrapped line below the call — long
+// output is expected here, so no effort is made to keep it to one line.
+// Both fall back to the same generic formatting for a tool this file
+// doesn't specifically know about (agent-as-tool specialist calls, a
+// future third-party tool) — those are already lean (a specialist's
+// result is its own prose, not noise), so the two modes look identical
+// for them either way.
+//
+// While pending is true, the status always renders as its own
+// full-width filled badge line regardless of verboseTools — feedback
+// was that plain colored text blended in too easily to notice a
+// conversation was blocked waiting on a decision, and that's still true
+// whether or not the rest of this entry is lean.
+func renderTool(s theme.Styles, name string, args, result map[string]any, status string, pending, verboseTools bool, width int) string {
 	callLine := s.ToolGutter.Render(toolGutter) + s.ToolCallName.Render(name)
-	if kv := formatKV(args); kv != "" {
-		callLine += s.ToolCallArgs.Render("  " + kv)
-	}
-	if status == "" {
-		return callLine
-	}
-	if pending {
-		return callLine + "\n" + s.ToolConfirmPending.Width(width).Render(" "+status)
+	if argsText := formatToolArgs(name, args, verboseTools); argsText != "" {
+		callLine += s.ToolCallArgs.Render("  " + argsText)
 	}
 
-	statusStyle := s.ToolResult
-	switch status {
-	case confirmStatusApproved:
-		statusStyle = s.ToolConfirmApproved
-	case confirmStatusDenied:
-		statusStyle = s.ToolConfirmDenied
+	switch {
+	case result != nil:
+		text := formatToolResult(name, result, verboseTools)
+		if !verboseTools {
+			return callLine + "  " + s.ToolResult.Render(text)
+		}
+		return callLine + "\n" + renderToolStatusLine(s, s.ToolResult, text, width)
+	case pending:
+		return callLine + "\n" + s.ToolConfirmPending.Width(width).Render(" "+status)
+	case status != "":
+		statusStyle := s.ToolResult
+		switch status {
+		case confirmStatusApproved:
+			statusStyle = s.ToolConfirmApproved
+		case confirmStatusDenied:
+			statusStyle = s.ToolConfirmDenied
+		}
+		if !verboseTools {
+			return callLine + "  " + statusStyle.Render(status)
+		}
+		return callLine + "\n" + renderToolStatusLine(s, statusStyle, status, width)
+	default:
+		return callLine
 	}
-	return callLine + "\n" + renderToolStatusLine(s, statusStyle, status, width)
 }
 
 // renderToolStatusLine word-wraps a tool's status text to width (minus
@@ -240,6 +263,114 @@ func summarizeResult(result map[string]any) string {
 		}
 	}
 	return formatKV(result)
+}
+
+// formatToolArgs is renderTool's call-line formatter. list_files always
+// shows its target path regardless of verboseTools — there's nothing
+// else on its call line worth showing either way, and the directory
+// being listed is exactly the thing you'd want to know at a glance, not
+// something worth hiding behind a toggle. read_file/write_file show just
+// the path in lean mode (dropping write_file's content argument entirely
+// rather than the truncated-but-still-noisy preview formatKV would
+// otherwise show); verbose falls back to the generic formatKV, same as
+// an unrecognized tool name gets in either mode.
+func formatToolArgs(name string, args map[string]any, verbose bool) string {
+	if name == "list_files" {
+		if path, ok := args["path"].(string); ok && path != "" {
+			return path
+		}
+		return "." // listFiles' own default when no path is given
+	}
+	if verbose {
+		return formatKV(args)
+	}
+	if name == "read_file" || name == "write_file" {
+		if path, ok := args["path"].(string); ok && path != "" {
+			return path
+		}
+	}
+	return formatKV(args)
+}
+
+// readFilePreviewMaxLines caps how much of a file's content verbose mode
+// actually prints — verbose means "more than the lean one-liner," not
+// "however many thousand lines the file happens to have."
+const readFilePreviewMaxLines = 50
+
+// formatToolResult is renderTool's status-line formatter. For this
+// app's own three built-in tools, lean and verbose deliberately show
+// categorically different things rather than the same information at
+// two lengths: lean is always a bare count/size (no file names, no file
+// content, no exception for a short list that would technically still
+// fit), verbose is the actual content/listing. Falls back to the
+// generic summarizeResult both for an unrecognized tool and for
+// whichever piece a recognized tool's result doesn't match (e.g.
+// write_file has nothing more to say in verbose mode than lean already
+// shows, just formatted generically instead).
+func formatToolResult(name string, result map[string]any, verbose bool) string {
+	switch name {
+	case "read_file":
+		if content, ok := result["content"].(string); ok {
+			if !verbose {
+				return "read " + humanBytes(len(content))
+			}
+			return truncateLines(content, readFilePreviewMaxLines)
+		}
+	case "write_file":
+		if !verbose {
+			if n, ok := intFromAny(result["bytesWritten"]); ok {
+				return "wrote " + humanBytes(n)
+			}
+		}
+	case "list_files":
+		if files, ok := result["files"].([]any); ok && !verbose {
+			return fmt.Sprintf("%d entries", len(files))
+		}
+		// verbose falls through to summarizeResult, which lists every name.
+	}
+	return summarizeResult(result)
+}
+
+// truncateLines caps s at maxLines, noting how many lines were hidden
+// rather than silently dropping them — used for read_file's verbose
+// preview, so even "the full content" has a sane ceiling instead of
+// however long the file actually is.
+func truncateLines(s string, maxLines int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= maxLines {
+		return s
+	}
+	return strings.Join(lines[:maxLines], "\n") + fmt.Sprintf("\n… (%d more lines)", len(lines)-maxLines)
+}
+
+// humanBytes renders a byte count the way a person would read it aloud
+// rather than as a raw integer — mainly matters for read_file, where a
+// real file's content can run from a few bytes to several megabytes.
+func humanBytes(n int) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
+	default:
+		return fmt.Sprintf("%d bytes", n)
+	}
+}
+
+// intFromAny covers both plausible runtime types for a tool result's
+// numeric field: the handler itself returns a Go int (writeFileResult.
+// BytesWritten), but by the time it's round-tripped through ADK's event
+// model as a map[string]any it may have gone through a JSON encode/
+// decode step, which turns any number into float64 — check both rather
+// than assume one.
+func intFromAny(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case float64:
+		return int(n), true
+	}
+	return 0, false
 }
 
 // maxArgValuePreview caps how much of a single argument value's string

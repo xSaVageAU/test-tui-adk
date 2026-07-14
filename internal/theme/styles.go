@@ -52,11 +52,15 @@ type Styles struct {
 
 	// Tool activity renders as a colored left gutter bar (like a
 	// blockquote marker) with the call and its result grouped tight
-	// beneath it — see renderToolCall/renderToolResult in chat.go.
+	// beneath it (or, in lean mode, on the same line) — see renderTool
+	// in chat.go. ToolCallName is a filled badge, same Warning-colored
+	// treatment as HeaderAutoBadge/ToolConfirmPending, so a tool call
+	// reads as a distinct event at a glance rather than just bold text
+	// blending into the surrounding gutter.
 	ToolGutter   lipgloss.Style // the "▏" bar itself
-	ToolCallName lipgloss.Style // bold tool name on the call line
+	ToolCallName lipgloss.Style // filled badge around the tool name
 	ToolCallArgs lipgloss.Style // "key=value" args, de-emphasized vs. the name
-	ToolResult   lipgloss.Style // the result line underneath
+	ToolResult   lipgloss.Style // the result line/segment
 
 	// ToolConfirm* style the status line under a tool call awaiting human
 	// approval (see App.hitlMode). ToolConfirmPending is a filled badge,
@@ -213,8 +217,10 @@ func New(t Theme) Styles {
 		Foreground(t.Warning)
 
 	s.ToolCallName = lipgloss.NewStyle().
-		Foreground(t.Warning).
-		Bold(true)
+		Background(t.Warning).
+		Foreground(t.TextOnFill).
+		Bold(true).
+		Padding(0, 1)
 
 	s.ToolCallArgs = lipgloss.NewStyle().
 		Foreground(t.TextMuted)

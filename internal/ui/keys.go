@@ -43,6 +43,15 @@ type keyMap struct {
 	// text-editing muscle-memory shortcut (ctrl+a, ctrl+k, ...) would
 	// otherwise claim.
 	AutoAccept key.Binding
+
+	// VerboseTools toggles the same "verbose tool output" setting /settings
+	// exposes — f2 rather than a modifier combo: alt+v was tried first,
+	// but on at least one real terminal setup it collided with ctrl+v
+	// paste anyway (Alt-key encoding isn't reliably distinct from Ctrl on
+	// every terminal), so this sidesteps modifier-key ambiguity entirely
+	// rather than trying to find yet another combo that might collide
+	// elsewhere.
+	VerboseTools key.Binding
 }
 
 var keys = keyMap{
@@ -78,12 +87,16 @@ var keys = keyMap{
 		key.WithKeys("shift+tab"),
 		key.WithHelp("shift+tab", "auto-accept"),
 	),
+	VerboseTools: key.NewBinding(
+		key.WithKeys("f2"),
+		key.WithHelp("f2", "verbose tools"),
+	),
 }
 
 // ShortHelp and FullHelp satisfy bubbles/help.KeyMap so the footer help
 // line can be generated from the same bindings Update() switches on.
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{keys.Send, keys.Commands, keys.ScrollUp, keys.AutoAccept, keys.Quit}
+	return []key.Binding{keys.Send, keys.Commands, keys.ScrollUp, keys.AutoAccept, keys.VerboseTools, keys.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {

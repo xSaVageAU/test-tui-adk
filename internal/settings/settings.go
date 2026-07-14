@@ -37,6 +37,14 @@ type UISettings struct {
 	// existed) is treated as ModeNormal — deliberately fail-safe rather
 	// than needing its own explicit "missing/malformed" handling here.
 	PermissionMode string `json:"permissionMode"`
+	// VerboseTools governs how much detail a tool call/result shows in
+	// the transcript — false (the default) is a one-line lean summary
+	// per call (see internal/ui/chat.go's formatToolArgs/
+	// formatToolResult); true is the full generic key=value/content
+	// dump. Off by default: a model's own read_file/write_file/
+	// list_files results are routine, not something worth reading in
+	// full on every call.
+	VerboseTools bool `json:"verboseTools"`
 }
 
 // ModeNormal/ModeFullAuto are PermissionMode's only two valid values —

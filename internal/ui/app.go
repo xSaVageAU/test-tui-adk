@@ -67,6 +67,7 @@ type App struct {
 	messages       []ChatMessage
 	highlightUser  bool   // experimental: backdrop highlight behind user messages
 	streamReplies  bool   // token-by-token replies via Backend.Stream instead of Send
+	verboseTools   bool   // false shows a one-line lean summary per tool call/result; see chat.go's formatToolArgs/formatToolResult
 	lastPromptText string // most recent user message; backs the sticky-prompt overlay in View()
 
 	hitlMode            hitlMode       // how a pending tool approval is presented — see hitl.go
@@ -191,6 +192,7 @@ func NewApp(cfg AppConfig) *App {
 		status:           theme.StatusIdle,
 		highlightUser:    uiSettings.HighlightUser,
 		streamReplies:    uiSettings.StreamReplies,
+		verboseTools:     uiSettings.VerboseTools,
 		hitlMode:         parseHITLMode(uiSettings.HITLMode),
 		permissionMode:   parsePermissionMode(uiSettings.PermissionMode),
 		inputLines:       minInputLines,
@@ -272,7 +274,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case msg.chunk.ToolCall != nil:
 			a.upsertToolMessage(msg.chunk.ToolCall.ID, msg.chunk.ToolCall.Name, msg.chunk.ToolCall.Args, toolStatusRunning, false)
 		case msg.chunk.ToolResult != nil:
-			a.upsertToolMessage(msg.chunk.ToolResult.ID, msg.chunk.ToolResult.Name, nil, summarizeResult(msg.chunk.ToolResult.Result), false)
+			a.completeToolMessage(msg.chunk.ToolResult.ID, msg.chunk.ToolResult.Name, msg.chunk.ToolResult.Result)
 		case msg.chunk.Usage != nil:
 			a.accumulateUsage(msg.chunk.Usage)
 		case msg.chunk.FinishReason != "":
@@ -356,6 +358,10 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, keys.AutoAccept):
 		a.toggleAutoAccept()
+		return a, nil
+
+	case key.Matches(msg, keys.VerboseTools):
+		a.toggleSetting("verbose")
 		return a, nil
 
 	case a.paletteKind == paletteTextInput:
@@ -613,39 +619,67 @@ func (a *App) attachTurnUsage() {
 	}
 }
 
-// upsertToolMessage tracks one tool invocation's entire lifecycle — call,
-// optional approval, eventual result — as a single transcript entry found
-// and updated by call ID rather than appended fresh each event. Without
-// this, a call's confirmation request and its eventual result each used
-// to print as their own separate message, so the same invocation showed
-// up two or three times in a row as it progressed.
+// upsertToolMessage tracks a tool call's opening state — running, then
+// (if applicable) awaiting approval or approved/denied — as a single
+// transcript entry found and updated by call ID rather than appended
+// fresh each event; see completeToolMessage for how the final result
+// lands, in a distinct field so it can be reformatted live if
+// verboseTools changes later instead of baking in a summary once at
+// event time. Without upserting-by-ID, a call's confirmation request and
+// its eventual result each used to print as their own separate message,
+// so the same invocation showed up two or three times in a row as it
+// progressed.
 //
-// On first sight of an ID a fresh entry is created, and — same as the old
-// insertToolMessage — a fresh empty placeholder is opened after it for
-// whatever prose the agent sends next, dropping the previous placeholder
-// first if it never received any text (a tool call visually interrupts
-// the streaming reply in progress, so that reply's text shouldn't keep
-// appending into the same bubble as if nothing happened, but an
-// untouched placeholder isn't worth preserving as a stray empty bubble).
-// On every later sighting of the same ID, only that entry's status is
+// On every later sighting of the same ID, only status/pending are
 // touched — args aren't overwritten, since only the initial call event
-// carries them; a confirmation or result event passes nil/reuses them.
+// carries them; a confirmation event reuses them via nil.
 func (a *App) upsertToolMessage(id, name string, args map[string]any, status string, pending bool) {
 	if idx, ok := a.toolMsgIndex[id]; ok && idx < len(a.messages) {
 		a.messages[idx].ToolStatus = status
 		a.messages[idx].ToolPending = pending
 		return
 	}
+	a.newToolMessage(id, ChatMessage{ToolName: name, ToolArgs: args, ToolStatus: status, ToolPending: pending, At: time.Now()})
+}
 
+// completeToolMessage records a finished call's raw result. Kept
+// separate from upsertToolMessage (rather than another status string)
+// specifically so renderTool can reformat it live if verboseTools is
+// toggled after the fact — see ChatMessage's doc comment. A nil result
+// is normalized to an empty map so a genuinely-empty result stays
+// distinguishable from "no result yet" (ChatMessage.ToolResult == nil),
+// which is what renderTool actually checks.
+func (a *App) completeToolMessage(id, name string, result map[string]any) {
+	if result == nil {
+		result = map[string]any{}
+	}
+	if idx, ok := a.toolMsgIndex[id]; ok && idx < len(a.messages) {
+		a.messages[idx].ToolResult = result
+		a.messages[idx].ToolStatus = ""
+		a.messages[idx].ToolPending = false
+		return
+	}
+	// Shouldn't happen — a result always follows its own call, whose
+	// ToolCall event already created this entry — but mirrors
+	// upsertToolMessage's fallback rather than silently dropping a
+	// result with nowhere to attach to.
+	a.newToolMessage(id, ChatMessage{ToolName: name, ToolResult: result, At: time.Now()})
+}
+
+// newToolMessage appends a fresh RoleTool entry plus the trailing empty
+// agent placeholder every tool entry gets — same as the old
+// insertToolMessage — a fresh empty placeholder is opened after it for
+// whatever prose the agent sends next, dropping the previous placeholder
+// first if it never received any text (a tool call visually interrupts
+// the streaming reply in progress, so that reply's text shouldn't keep
+// appending into the same bubble as if nothing happened, but an
+// untouched placeholder isn't worth preserving as a stray empty bubble).
+// Records id -> index in toolMsgIndex so later events for the same call
+// find their way back here instead of appending a duplicate entry.
+func (a *App) newToolMessage(id string, msg ChatMessage) {
+	msg.Role = RoleTool
 	a.dropEmptyStreamingPlaceholder()
-	a.messages = append(a.messages, ChatMessage{
-		Role:        RoleTool,
-		ToolName:    name,
-		ToolArgs:    args,
-		ToolStatus:  status,
-		ToolPending: pending,
-		At:          time.Now(),
-	})
+	a.messages = append(a.messages, msg)
 	if a.toolMsgIndex == nil {
 		a.toolMsgIndex = map[string]int{}
 	}
@@ -695,7 +729,7 @@ func (a *App) applyTheme() {
 // keystroke, resize, and cursor blink, so it has to leave scrolling
 // alone; see followTranscript for the variant that's allowed to move it.
 func (a *App) refreshTranscript() {
-	content, userMsgLines := renderTranscript(a.styles, a.bootInfo, a.messages, a.viewport.Width, a.highlightUser)
+	content, userMsgLines := renderTranscript(a.styles, a.bootInfo, a.messages, a.viewport.Width, a.highlightUser, a.verboseTools)
 	a.viewport.SetContent(content)
 	a.userMsgLines = userMsgLines
 }
