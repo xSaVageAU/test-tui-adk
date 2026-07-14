@@ -36,7 +36,7 @@ type builtRoot struct {
 // anymore) is still the only one that ever shows up as
 // session.Event.Author, since agent-as-tool never changes who's
 // speaking.
-func buildRootAgent(ctx context.Context, apiKey string) (builtRoot, error) {
+func buildRootAgent(ctx context.Context, callerProvider, callerAPIKey string) (builtRoot, error) {
 	rootCfg, err := loadRootAgentConfig()
 	if err != nil {
 		return builtRoot{}, fmt.Errorf("load root agent config: %w", err)
@@ -69,7 +69,7 @@ func buildRootAgent(ctx context.Context, apiKey string) (builtRoot, error) {
 		rootTools = append(rootTools, t)
 	}
 
-	rootModel, err := buildModel(ctx, rootCfg.Provider, rootCfg.Model, geminiOverride(rootCfg.Provider, apiKey))
+	rootModel, err := buildModel(ctx, rootCfg.Provider, rootCfg.Model, keyOverride(rootCfg.Provider, callerProvider, callerAPIKey))
 	if err != nil {
 		return builtRoot{}, fmt.Errorf("create root model: %w", err)
 	}
@@ -82,7 +82,7 @@ func buildRootAgent(ctx context.Context, apiKey string) (builtRoot, error) {
 	if err != nil {
 		return builtRoot{}, fmt.Errorf("load sub-agent configs: %w", err)
 	}
-	subAgents, err := buildSubAgents(ctx, apiKey, rootModel, toolRegistry, subConfigs)
+	subAgents, err := buildSubAgents(ctx, callerProvider, callerAPIKey, rootModel, toolRegistry, subConfigs)
 	if err != nil {
 		return builtRoot{}, err
 	}

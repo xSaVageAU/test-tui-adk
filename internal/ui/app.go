@@ -97,8 +97,32 @@ type App struct {
 	paletteKind     paletteKind
 	paletteTitle    string
 	paletteList     list.Model
-	keyInput        textinput.Model // backs paletteKeyInput; see keyinput.go
+	keyInput        textinput.Model // backs paletteTextInput; see keyinput.go
 	themeMenuOrigin string          // theme active before /theme opened, for Esc to revert to
+
+	// textPopupKind/textPopupLabel/textPopupProvider back paletteTextInput
+	// (see keyinput.go) — one popup shared by /key's masked API-key field
+	// and /agents' unmasked model field, distinguished by kind so Enter
+	// knows which submit* to call.
+	textPopupKind     textPopupKind
+	textPopupLabel    string // this popup's title, e.g. "Set Gemini API key" or "Set model for research"
+	textPopupProvider string // textPopupAPIKey: which provider the key is for
+
+	// agentMenuTarget/agentMenuSummaries back /agents' multi-step flow:
+	// agentMenuSummaries is snapshotted once when the top-level list
+	// opens (so a later step can show an agent's current provider/model
+	// without a redundant listAgents call), and agentMenuTarget is which
+	// entry's menu id ("root", or a sub-agent's ID) the provider-list and
+	// model-input steps are currently editing. See agentsmenu.go.
+	agentMenuTarget    string
+	agentMenuSummaries []AgentConfigSummary
+
+	// listAgents/setAgentProvider/setAgentModel back /agents — nil
+	// disables the command (mirrors newBackend's nil-disables-/key
+	// convention). See agentsmenu.go.
+	listAgents       func() ([]AgentConfigSummary, error)
+	setAgentProvider func(id, provider string) error
+	setAgentModel    func(id, modelName string) error
 
 	suggestMatches []commandSpec // live "/command" matches for the current input, if any
 	suggestIndex   int
@@ -128,6 +152,16 @@ type AppConfig struct {
 	// startup (empty if none), shown in the boot banner. Meaningless
 	// without a Backend — leave nil when Backend is nil.
 	Specialists []string
+	// ListAgents/SetAgentProvider/SetAgentModel back /agents — reading
+	// and editing config files directly, independent of whether a
+	// Backend connection currently exists (unlike NewBackend, these work
+	// even with Backend nil — fixing a bad provider/model is exactly
+	// what you'd want /agents for in that state). Pass nil for all three
+	// to disable /agents entirely, same as leaving NewBackend nil
+	// disables /key.
+	ListAgents       func() ([]AgentConfigSummary, error)
+	SetAgentProvider func(id, provider string) error
+	SetAgentModel    func(id, modelName string) error
 }
 
 // NewApp constructs the app with the default (first-registered) theme
@@ -153,16 +187,19 @@ func NewApp(cfg AppConfig) *App {
 			Theme:       mgr.Current().Name,
 			Specialists: cfg.Specialists,
 		},
-		agentName:      cfg.AgentName,
-		status:         theme.StatusIdle,
-		highlightUser:  uiSettings.HighlightUser,
-		streamReplies:  uiSettings.StreamReplies,
-		hitlMode:       parseHITLMode(uiSettings.HITLMode),
-		permissionMode: parsePermissionMode(uiSettings.PermissionMode),
-		inputLines:     minInputLines,
-		messages:       messages,
-		input:          newInput(styles),
-		help:           help.New(),
+		agentName:        cfg.AgentName,
+		status:           theme.StatusIdle,
+		highlightUser:    uiSettings.HighlightUser,
+		streamReplies:    uiSettings.StreamReplies,
+		hitlMode:         parseHITLMode(uiSettings.HITLMode),
+		permissionMode:   parsePermissionMode(uiSettings.PermissionMode),
+		inputLines:       minInputLines,
+		messages:         messages,
+		input:            newInput(styles),
+		help:             help.New(),
+		listAgents:       cfg.ListAgents,
+		setAgentProvider: cfg.SetAgentProvider,
+		setAgentModel:    cfg.SetAgentModel,
 	}
 	a.help.ShortSeparator = "  "
 	return a
@@ -249,11 +286,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case keySetMsg:
 		if msg.err != nil {
 			a.status = theme.StatusError
-			a.systemMessage("Could not connect with that key: " + msg.err.Error())
+			prefix := msg.failPrefix
+			if prefix == "" {
+				prefix = "Could not connect"
+			}
+			a.systemMessage(prefix + ": " + msg.err.Error())
 			return a, nil
 		}
 		a.backend = msg.backend
-		a.systemMessage("API key set.")
+		if msg.successMsg != "" {
+			a.systemMessage(msg.successMsg)
+		} else {
+			a.systemMessage("Connected.")
+		}
 
 		if a.pendingMessage != "" {
 			text := a.pendingMessage
@@ -280,7 +325,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	if a.paletteKind == paletteKeyInput {
+	if a.paletteKind == paletteTextInput {
 		var cmd tea.Cmd
 		a.keyInput, cmd = a.keyInput.Update(msg)
 		return a, cmd
@@ -311,8 +356,8 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.toggleAutoAccept()
 		return a, nil
 
-	case a.paletteKind == paletteKeyInput:
-		return a.handleKeyInputKey(msg)
+	case a.paletteKind == paletteTextInput:
+		return a.handleTextInputKey(msg)
 
 	case a.paletteKind == paletteConfirm:
 		return a.handleConfirmModalKey(msg)
@@ -384,11 +429,16 @@ func (a *App) handlePaletteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case key.Matches(msg, keys.Send):
-		if item, ok := a.paletteList.SelectedItem().(paletteItem); ok {
-			a.confirmMenuSelection(item.id)
+		item, ok := a.paletteList.SelectedItem().(paletteItem)
+		if !ok {
+			a.closeMenu()
+			return a, nil
 		}
-		a.closeMenu()
-		return a, nil
+		closeAfter, cmd := a.confirmMenuSelection(item.id)
+		if closeAfter {
+			a.closeMenu()
+		}
+		return a, cmd
 	}
 
 	var cmd tea.Cmd
@@ -439,7 +489,7 @@ func (a *App) sendMessage(text string) tea.Cmd {
 		// here, and the keySetMsg handler in Update sends this same text
 		// the moment a key is successfully set.
 		a.pendingMessage = text
-		a.openKeyInput()
+		a.openKeyProviderMenu()
 		return nil
 	}
 
@@ -738,8 +788,8 @@ func (a *App) layout() {
 	}
 
 	switch a.paletteKind {
-	case paletteKeyInput:
-		a.keyInput.Width = a.keyInputWidth() - 4
+	case paletteTextInput:
+		a.keyInput.Width = a.textPopupWidth() - 4
 	case paletteNone:
 		// nothing to resize
 	default:
@@ -777,8 +827,8 @@ func (a *App) View() string {
 	// context isn't lost and so /theme can preview its highlighted theme
 	// against the real screen behind it.
 	switch a.paletteKind {
-	case paletteKeyInput:
-		return renderKeyInputOverlay(frame, a.styles, a.keyInput, a.width, a.height)
+	case paletteTextInput:
+		return renderTextInputOverlay(frame, a.styles, a.textPopupLabel, a.keyInput, a.width, a.height)
 	case paletteNone:
 		return frame
 	default:

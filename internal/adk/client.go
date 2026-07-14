@@ -65,21 +65,24 @@ type Client struct {
 }
 
 // New builds the root agent (config-driven — see agents.go and
-// rootagent.go) and the runner backing it. apiKey is a Gemini key the
-// caller already has on hand (env var at startup, a value typed into
-// the /key popup, ...) — used only if the root agent (or a sub-agent)
-// actually turns out to be configured for Gemini; every other provider
-// resolves its own key from data/credentials.json instead (see
-// models.go's buildModel/geminiOverride), so an empty apiKey here isn't
-// an immediate error — it only becomes one once buildModel actually
-// needs a key it can't find.
-func New(ctx context.Context, apiKey string) (*Client, error) {
+// rootagent.go) and the runner backing it. apiKey, if non-empty, is a
+// key the caller already has on hand for provider specifically (env var
+// at startup, a value just typed into the /key popup, ...) — used only
+// if the root agent (or a sub-agent) actually turns out to be
+// configured for that same provider; every other provider resolves its
+// own key from data/credentials.json instead (see models.go's
+// buildModel/keyOverride). Both empty is not an immediate error — it
+// only becomes one once buildModel actually needs a key it can't find,
+// which lets a plain reload (rebuild everything from whatever's already
+// saved on disk, no fresh key) reuse this same entry point — see
+// internal/ui's /agents-triggered reload.
+func New(ctx context.Context, provider, apiKey string) (*Client, error) {
 	sessSvc, err := openSessionStore()
 	if err != nil {
 		return nil, fmt.Errorf("open session store: %w", err)
 	}
 
-	built, err := buildRootAgent(ctx, apiKey)
+	built, err := buildRootAgent(ctx, provider, apiKey)
 	if err != nil {
 		return nil, err
 	}

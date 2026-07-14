@@ -132,12 +132,12 @@ func loadSubAgentConfigs() ([]agentFileConfig, error) {
 // (see agents.go's buildRootAgent). A config with no Provider/Model of
 // its own reuses rootModel verbatim (no need to build an identical
 // model twice); one that specifies either resolves its own via
-// buildModel — apiKey (the Gemini key the root agent was built with) is
-// only actually used if the config's own provider is Gemini too (see
-// geminiOverride); anything else (e.g. a sub-agent configured for
-// OpenRouter, once that's implemented) resolves its own key from
-// data/credentials.json instead.
-func buildSubAgents(ctx context.Context, apiKey string, rootModel model.LLM, toolRegistry map[string]tool.Tool, configs []agentFileConfig) ([]agent.Agent, error) {
+// buildModel — callerProvider/callerAPIKey (whatever key the root agent
+// was built with) is only actually used as an override if the config's
+// own provider matches callerProvider too (see keyOverride); anything
+// else (e.g. a sub-agent configured for a different provider than root)
+// resolves its own key from data/credentials.json instead.
+func buildSubAgents(ctx context.Context, callerProvider, callerAPIKey string, rootModel model.LLM, toolRegistry map[string]tool.Tool, configs []agentFileConfig) ([]agent.Agent, error) {
 	agents := make([]agent.Agent, 0, len(configs))
 	for _, cfg := range configs {
 		tools := make([]tool.Tool, 0, len(cfg.Tools))
@@ -152,7 +152,7 @@ func buildSubAgents(ctx context.Context, apiKey string, rootModel model.LLM, too
 		m := rootModel
 		if cfg.Provider != "" || cfg.Model != "" {
 			var err error
-			m, err = buildModel(ctx, cfg.Provider, cfg.Model, geminiOverride(cfg.Provider, apiKey))
+			m, err = buildModel(ctx, cfg.Provider, cfg.Model, keyOverride(cfg.Provider, callerProvider, callerAPIKey))
 			if err != nil {
 				return nil, fmt.Errorf("sub-agent %q: %w", cfg.Name, err)
 			}

@@ -20,19 +20,46 @@ import (
 // key back but deliberately never writes one itself, so an env-var-
 // provided key is never silently persisted without the user having
 // explicitly run /key.
-func newBackend(ctx context.Context, apiKey string) (ui.Backend, error) {
-	client, err := adk.New(ctx, apiKey)
+//
+// /agents also calls this, via App.reloadBackend, with both provider
+// and apiKey left "" — that means "rebuild everything from whatever's
+// already saved on disk for each agent's own configured provider, no
+// fresh override key" (see adk.New's doc comment); the apiKey != ""
+// guard below is what stops that no-key reload from overwriting a real
+// saved key with an empty one.
+func newBackend(ctx context.Context, provider, apiKey string) (ui.Backend, error) {
+	client, err := adk.New(ctx, provider, apiKey)
 	if err != nil {
 		return nil, err
 	}
-	// Best-effort: failing to persist shouldn't block the key from being
-	// used for this run, and there's nowhere safe to report it from here
-	// (writing to stderr while the TUI owns the alt-screen would corrupt
-	// the rendered frame — the same reason GORM's default logger had to
-	// be silenced elsewhere in this codebase). Worst case, /key just
-	// needs to be run again next launch.
-	_ = adk.SaveAPIKey(adk.ProviderGemini, apiKey)
+	if apiKey != "" {
+		// Best-effort: failing to persist shouldn't block the key from
+		// being used for this run, and there's nowhere safe to report it
+		// from here (writing to stderr while the TUI owns the alt-screen
+		// would corrupt the rendered frame — the same reason GORM's
+		// default logger had to be silenced elsewhere in this codebase).
+		// Worst case, /key just needs to be run again next launch.
+		_ = adk.SaveAPIKey(provider, apiKey)
+	}
 	return client, nil
+}
+
+// listAgents/setAgentProvider/setAgentModel adapt the adk package's
+// config read/write functions to the plain function shapes ui.AppConfig
+// expects — same bridging reason as newBackend/BackendFactory: the ui
+// package never imports adk directly, only these caller-supplied
+// closures (and the ui.AgentConfigSummary shape, converted to/from
+// adk.AgentSummary here).
+func listAgents() ([]ui.AgentConfigSummary, error) {
+	agents, err := adk.ListAgentConfigs()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ui.AgentConfigSummary, len(agents))
+	for i, a := range agents {
+		out[i] = ui.AgentConfigSummary{ID: a.ID, Name: a.Name, Provider: a.Provider, Model: a.Model, IsRoot: a.IsRoot}
+	}
+	return out, nil
 }
 
 func main() {
@@ -62,7 +89,7 @@ func main() {
 		}
 	}
 
-	client, err := adk.New(ctx, apiKey)
+	client, err := adk.New(ctx, adk.ProviderGemini, apiKey)
 	switch {
 	case err == nil:
 		backend = client
@@ -76,12 +103,15 @@ func main() {
 	}
 
 	app := ui.NewApp(ui.AppConfig{
-		Backend:     backend,
-		BackendNote: note,
-		NewBackend:  newBackend,
-		ModelName:   modelName,
-		AgentName:   agentName,
-		Specialists: specialists,
+		Backend:          backend,
+		BackendNote:      note,
+		NewBackend:       newBackend,
+		ModelName:        modelName,
+		AgentName:        agentName,
+		Specialists:      specialists,
+		ListAgents:       listAgents,
+		SetAgentProvider: adk.SetAgentProvider,
+		SetAgentModel:    adk.SetAgentModel,
 	})
 
 	// WithMouseCellMotion is what actually makes the terminal report wheel

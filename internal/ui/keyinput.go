@@ -12,44 +12,105 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// keyInputMaxWidth caps how wide the /key popup grows on a roomy
-// terminal — plenty of headroom for a full API key at a glance without
-// it stretching edge-to-edge on a wide window.
-const keyInputMaxWidth = 64
+// textPopupKind distinguishes what paletteTextInput's Enter should do —
+// one popup (a.keyInput), shared by /key's masked API-key field and
+// /agents' unmasked model field, rather than two near-identical
+// components. See openKeyInput/openAgentModelInput for how each is
+// configured, and handleTextInputKey for how Enter routes on this.
+type textPopupKind int
 
-// keyInputWidth is the popup's target outer width: roomy but clamped to
+const (
+	textPopupNone textPopupKind = iota
+	textPopupAPIKey
+	textPopupAgentModel
+)
+
+// providerGemini/providerOpenRouter mirror adk.ProviderGemini/
+// adk.ProviderOpenRouter's exact string values — duplicated rather than
+// imported since this package never imports internal/adk (see
+// backend.go's doc comment on AgentConfigSummary); every provider value
+// this package handles ultimately came from or goes to that package
+// through the plain-string AppConfig closures, so drift would only ever
+// show up as "provider not recognized" here, never a compile error.
+const (
+	providerGemini     = "gemini"
+	providerOpenRouter = "openrouter"
+)
+
+// textPopupMaxWidth caps how wide the /key and /agents model popups
+// grow on a roomy terminal — plenty of headroom for a full API key or
+// model slug at a glance without stretching edge-to-edge on a wide window.
+const textPopupMaxWidth = 64
+
+// textPopupWidth is the popup's target outer width: roomy but clamped to
 // the terminal so it doesn't overflow a narrow one.
-func (a *App) keyInputWidth() int { return min(a.width-8, keyInputMaxWidth) }
+func (a *App) textPopupWidth() int { return min(a.width-8, textPopupMaxWidth) }
 
-// openKeyInput shows the /key popup: a single masked field for pasting an
-// API key, submitted to newBackend to build a fresh Backend without
-// restarting the app.
-func (a *App) openKeyInput() {
+// openKeyProviderMenu is /key's first step: which provider is this key
+// for. Selecting one opens the masked text field (openKeyInput) scoped
+// to that provider.
+func (a *App) openKeyProviderMenu() {
+	if a.newBackend == nil {
+		a.systemMessage("Can't set a key: no backend factory configured.")
+		return
+	}
+	items := []paletteItem{
+		{id: providerGemini, title: "Gemini", desc: "Google's Gemini API"},
+		{id: providerOpenRouter, title: "OpenRouter", desc: "OpenAI-compatible, many models"},
+	}
+	a.openMenu(paletteKeyProvider, "Set API key — choose provider", items)
+}
+
+// openKeyInput shows the masked API-key popup for provider, submitted to
+// newBackend to build a fresh Backend without restarting the app.
+func (a *App) openKeyInput(provider string) {
 	ti := textinput.New()
-	ti.Placeholder = "GOOGLE_API_KEY"
+	ti.Placeholder = keyPlaceholderFor(provider)
 	ti.EchoMode = textinput.EchoPassword
 	ti.EchoCharacter = '•'
 	ti.CharLimit = 256
-	ti.Width = a.keyInputWidth() - 4
+	ti.Width = a.textPopupWidth() - 4
 	ti.PromptStyle = a.styles.InputPrompt
 	ti.PlaceholderStyle = a.styles.InputHint
 	ti.Focus()
 
 	a.keyInput = ti
-	a.paletteKind = paletteKeyInput
+	a.textPopupKind = textPopupAPIKey
+	a.textPopupProvider = provider
+	a.textPopupLabel = "Set " + providerDisplayName(provider) + " API key"
+	a.paletteKind = paletteTextInput
 }
 
-// handleKeyInputKey runs while the /key popup has focus: Esc cancels
-// without changing the backend, Enter submits, everything else edits the
-// masked field.
-func (a *App) handleKeyInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func keyPlaceholderFor(provider string) string {
+	if provider == providerOpenRouter {
+		return "sk-or-..."
+	}
+	return "GOOGLE_API_KEY"
+}
+
+func providerDisplayName(provider string) string {
+	if provider == providerOpenRouter {
+		return "OpenRouter"
+	}
+	return "Gemini"
+}
+
+// handleTextInputKey runs while paletteTextInput has focus: Esc cancels,
+// Enter submits (routed by textPopupKind to whichever field this popup
+// is currently backing), everything else edits the field.
+func (a *App) handleTextInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Escape):
-		a.closeMenu()
+		a.cancelMenu()
 		return a, nil
 
 	case key.Matches(msg, keys.Send):
-		return a, a.submitKey()
+		switch a.textPopupKind {
+		case textPopupAgentModel:
+			return a, a.submitAgentModel()
+		default:
+			return a, a.submitKey()
+		}
 	}
 
 	var cmd tea.Cmd
@@ -58,11 +119,13 @@ func (a *App) handleKeyInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // submitKey closes the popup and, if a non-empty key was entered, asks
-// newBackend to build a Backend from it. Building a client isn't
-// guaranteed to be network-free (or fast), so this runs as a tea.Cmd
-// rather than blocking Update.
+// newBackend to build a Backend from it for whichever provider the
+// popup was opened for. Building a client isn't guaranteed to be
+// network-free (or fast), so this runs as a tea.Cmd rather than
+// blocking Update.
 func (a *App) submitKey() tea.Cmd {
 	apiKey := strings.TrimSpace(a.keyInput.Value())
+	provider := a.textPopupProvider
 	a.closeMenu()
 
 	if apiKey == "" {
@@ -74,29 +137,40 @@ func (a *App) submitKey() tea.Cmd {
 	}
 
 	factory := a.newBackend
+	label := providerDisplayName(provider) + " API key set."
 	return func() tea.Msg {
-		backend, err := factory(context.Background(), apiKey)
-		return keySetMsg{backend: backend, err: err}
+		backend, err := factory(context.Background(), provider, apiKey)
+		return keySetMsg{backend: backend, err: err, successMsg: label, failPrefix: "Could not connect with that key"}
 	}
 }
 
-// keySetMsg carries the result of submitKey's async backend construction.
+// keySetMsg carries the result of an async backend rebuild — submitKey's
+// (a fresh key just typed into /key) or reloadBackend's (/agents,
+// reconnecting after a config edit with no new key of its own).
 type keySetMsg struct {
 	backend Backend
 	err     error
+	// successMsg/failPrefix let one message type serve both callers with
+	// a message that actually names what was being attempted — "" falls
+	// back to a generic wording.
+	successMsg string
+	failPrefix string
 }
 
-// renderKeyInputOverlay draws the /key popup the same way the list-backed
-// popups do — centered over the already-rendered app frame — just with a
-// masked text field instead of a list.
-func renderKeyInputOverlay(bg string, s theme.Styles, ti textinput.Model, width, height int) string {
-	// ti.Width is the field's own committed width (set in openKeyInput,
-	// kept in sync on resize by App.layout) — reading it back here rather
-	// than recomputing keeps a single source of truth for the popup's
-	// outer width instead of two formulas that could drift apart.
+// renderTextInputOverlay draws paletteTextInput the same way the
+// list-backed popups do — centered over the already-rendered app frame
+// — just with a single text field instead of a list. Shared by /key's
+// masked field and /agents' unmasked model field; title comes from
+// a.textPopupLabel, set when each is opened.
+func renderTextInputOverlay(bg string, s theme.Styles, title string, ti textinput.Model, width, height int) string {
+	// ti.Width is the field's own committed width (set in openKeyInput/
+	// openAgentModelInput, kept in sync on resize by App.layout) —
+	// reading it back here rather than recomputing keeps a single source
+	// of truth for the popup's outer width instead of two formulas that
+	// could drift apart.
 	boxWidth := ti.Width + 4
 
-	title := renderPaletteTitle(s, "Set API key", boxWidth)
+	titleRow := renderPaletteTitle(s, title, boxWidth)
 	field := s.InputBarFocused.Width(boxWidth - 2).Render(ti.View())
 	// Width() here isn't optional: any line shorter than its siblings
 	// gets auto-padded by PaletteBorder's own border-drawing step below,
@@ -105,7 +179,7 @@ func renderKeyInputOverlay(bg string, s theme.Styles, ti textinput.Model, width,
 	// stray black patch.
 	hint := s.PaletteDesc.Width(boxWidth).Render("enter save · esc cancel")
 
-	content := title + "\n\n" + field + "\n\n" + hint
+	content := titleRow + "\n\n" + field + "\n\n" + hint
 	box := s.PaletteBorder.Render(content)
 
 	x := max((width-lipgloss.Width(box))/2, 0)

@@ -20,12 +20,13 @@ const DefaultModelName = "gemini-3.1-flash-lite"
 // buildModel resolves (provider, modelName) to a real model.LLM — an
 // empty provider defaults to ProviderGemini, an empty modelName to
 // DefaultModelName. apiKeyOverride lets a caller hand in a key it
-// already has on hand for this exact provider (main.go only ever
-// sources a Gemini key, from GOOGLE_API_KEY or /key — see
-// geminiOverride); left empty, the key is looked up from
+// already has on hand for this exact provider (main.go's startup flow,
+// or a freshly-typed-but-not-yet-saved /key submission — see
+// keyOverride); left empty, the key is looked up from
 // data/credentials.json via LoadAPIKey instead, which is how every
-// provider besides "whatever main.go started with" gets its key,
-// including a sub-agent configured for a different provider than root.
+// provider besides whatever the caller's own override happens to be for
+// gets its key, including a sub-agent configured for a different
+// provider than root.
 //
 // Gemini and OpenRouter are both implemented. Any other provider value
 // is a clear, immediate error rather than a silent fallback, since
@@ -68,15 +69,24 @@ func buildModel(ctx context.Context, provider, modelName, apiKeyOverride string)
 	}
 }
 
-// geminiOverride returns apiKey when provider resolves to Gemini (empty
-// counts as Gemini, same default buildModel applies), "" otherwise.
-// Callers in this package (buildRootAgent, buildSubAgents) only ever
-// have a Gemini key on hand to offer as an override — main.go sources
-// it from GOOGLE_API_KEY or the /key popup, both Gemini-specific — so a
-// non-Gemini provider always falls through to buildModel's own
-// LoadAPIKey lookup instead of incorrectly reusing this one.
-func geminiOverride(provider, apiKey string) string {
-	if provider == "" || provider == ProviderGemini {
+// keyOverride returns apiKey when configProvider (an agent's own
+// provider, "" meaning ProviderGemini) matches callerProvider (the
+// provider the caller's apiKey was actually issued for, same
+// empty-means-Gemini default) — "" otherwise, letting buildModel fall
+// through to its own LoadAPIKey(provider) lookup. Callers in this
+// package (buildRootAgent, buildSubAgents) only ever have one freshly-
+// supplied key on hand at a time — main.go's startup flow always offers
+// a Gemini one; /key offers whatever provider its popup asked for — so
+// this is what stops that key from being incorrectly reused for an
+// agent configured for a different provider.
+func keyOverride(configProvider, callerProvider, apiKey string) string {
+	if configProvider == "" {
+		configProvider = ProviderGemini
+	}
+	if callerProvider == "" {
+		callerProvider = ProviderGemini
+	}
+	if configProvider == callerProvider {
 		return apiKey
 	}
 	return ""

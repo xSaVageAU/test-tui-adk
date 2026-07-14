@@ -24,7 +24,8 @@ var commandSpecs = []commandSpec{
 	{Name: "sessions", Desc: "Switch to a past session"},
 	{Name: "theme", Desc: "Change the color theme"},
 	{Name: "settings", Desc: "Adjust settings"},
-	{Name: "key", Desc: "Set your GOOGLE_API_KEY"},
+	{Name: "key", Desc: "Set a provider API key"},
+	{Name: "agents", Desc: "Configure agent provider/model"},
 }
 
 // commandQuery returns the text after a leading "/" in the input box, and
@@ -84,9 +85,11 @@ func (a *App) runCommand(name string) tea.Cmd {
 	case "settings":
 		a.openSettingsMenu()
 	case "key":
-		a.openKeyInput()
+		a.openKeyProviderMenu()
+	case "agents":
+		a.openAgentsMenu()
 	default:
-		a.systemMessage("Unknown command: /" + name + " — try /new, /sessions, /theme, /settings, or /key.")
+		a.systemMessage("Unknown command: /" + name + " — try /new, /sessions, /theme, /settings, /key, or /agents.")
 	}
 	return nil
 }
@@ -146,20 +149,43 @@ func (a *App) cancelMenu() {
 	case paletteTheme:
 		a.themeMgr.Set(a.themeMenuOrigin)
 		a.applyTheme()
-	case paletteKeyInput:
-		if a.pendingMessage != "" {
-			a.pendingMessage = ""
-			a.status = theme.StatusError
-			a.systemMessage("Message not sent — no API key set.")
+	case paletteKeyProvider:
+		a.dropPendingMessage()
+	case paletteTextInput:
+		if a.textPopupKind == textPopupAPIKey {
+			a.dropPendingMessage()
 		}
 	}
 	a.closeMenu()
 }
 
+// dropPendingMessage reports (and clears) a message held by sendMessage
+// while /key was collecting a key it never actually got — called from
+// wherever the /key flow can be cancelled (either its provider-picker
+// first step or the key-entry second step), so a cancelled /key never
+// leaves a message silently stranded to be surprise-sent by some later,
+// unrelated successful connection.
+func (a *App) dropPendingMessage() {
+	if a.pendingMessage == "" {
+		return
+	}
+	a.pendingMessage = ""
+	a.status = theme.StatusError
+	a.systemMessage("Message not sent — no API key set.")
+}
+
 // confirmMenuSelection runs the effect of picking id from whichever menu
 // is currently open. For the /theme menu the theme is already live (see
-// previewTheme) — confirming just makes it permanent instead of reverting.
-func (a *App) confirmMenuSelection(id string) {
+// previewTheme) — confirming just makes it permanent instead of
+// reverting. Returns whether the menu should close: true for a terminal
+// action (a setting toggled, a theme/session picked), false when the
+// selection opened another menu instead (see agentsmenu.go's /agents
+// steps) — handlePaletteKey only closes when this is true, so a
+// multi-step flow can descend without being force-closed after each
+// pick. The tea.Cmd, when non-nil, is a terminal action that also needs
+// an async follow-up (saving an agent's provider kicks off a backend
+// reload) — handlePaletteKey runs it regardless of the close decision.
+func (a *App) confirmMenuSelection(id string) (bool, tea.Cmd) {
 	switch a.paletteKind {
 	case paletteTheme:
 		a.systemMessage("Theme set to " + id + ".")
@@ -167,7 +193,18 @@ func (a *App) confirmMenuSelection(id string) {
 		a.toggleSetting(id)
 	case paletteSessions:
 		a.switchSession(id)
+	case paletteKeyProvider:
+		a.openKeyInput(id)
+		return false, nil
+	case paletteAgents:
+		a.openAgentDetailMenu(id)
+		return false, nil
+	case paletteAgentDetail:
+		return a.confirmAgentDetailSelection(id)
+	case paletteAgentProvider:
+		return true, a.saveAgentProvider(id)
 	}
+	return true, nil
 }
 
 // previewTheme applies a theme immediately, without waiting for the menu

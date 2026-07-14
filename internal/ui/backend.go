@@ -104,8 +104,27 @@ type ToolConfirmationRequest struct {
 	Hint       string // human-readable explanation, if the tool provided one; may be ""
 }
 
-// BackendFactory builds a Backend from a user-supplied API key — how the
-// /key popup connects (or reconnects) without restarting the app. main
-// wires the concrete constructor (adk.New) in; ui only ever sees this
-// shape.
-type BackendFactory func(ctx context.Context, apiKey string) (Backend, error)
+// BackendFactory builds a Backend from a user-supplied API key for the
+// given provider — how the /key popup connects (or reconnects) without
+// restarting the app. main wires the concrete constructor (adk.New) in;
+// ui only ever sees this shape. Both provider and apiKey left "" means
+// "rebuild from whatever's already saved on disk for each agent's own
+// configured provider, no fresh key" — how /agents reloads the backend
+// after a config edit without needing a key of its own (see
+// App.reloadBackend).
+type BackendFactory func(ctx context.Context, provider, apiKey string) (Backend, error)
+
+// AgentConfigSummary is one agent's identity plus model selection, as
+// read from its config file — the /agents menu's-eye view of
+// adk.AgentSummary (kept as a distinct, ui-owned type for the same
+// reason SessionSummary is: this package never imports adk directly).
+// ID is "" for the root agent, otherwise a sub-agent's own identifier —
+// opaque here, just round-tripped back into SetAgentProvider/
+// SetAgentModel to say which agent an edit is for.
+type AgentConfigSummary struct {
+	ID       string
+	Name     string
+	Provider string
+	Model    string
+	IsRoot   bool
+}
