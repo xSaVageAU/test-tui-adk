@@ -31,7 +31,7 @@ func newBackend(ctx context.Context, apiKey string) (ui.Backend, error) {
 	// the rendered frame — the same reason GORM's default logger had to
 	// be silenced elsewhere in this codebase). Worst case, /key just
 	// needs to be run again next launch.
-	_ = adk.SaveAPIKey(apiKey)
+	_ = adk.SaveAPIKey(adk.ProviderGemini, apiKey)
 	return client, nil
 }
 
@@ -57,7 +57,7 @@ func main() {
 	// writes to the credentials file — only an explicit /key does.
 	apiKey, keySource := os.Getenv("GOOGLE_API_KEY"), "the GOOGLE_API_KEY environment variable"
 	if apiKey == "" {
-		if saved, err := adk.LoadAPIKey(); err == nil && saved != "" {
+		if saved, err := adk.LoadAPIKey(adk.ProviderGemini); err == nil && saved != "" {
 			apiKey, keySource = saved, "your saved API key"
 		}
 	}

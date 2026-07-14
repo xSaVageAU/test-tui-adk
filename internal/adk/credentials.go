@@ -6,12 +6,18 @@ import (
 	"os"
 )
 
-// providerGemini identifies Gemini in the persisted credentials file
-// (and in settings.json / a sub-agent's agent.json — see models.go) —
-// the only provider today, but keying by name from the start means
-// adding OpenRouter/LM Studio/Ollama later is a new map entry, not a
-// file-format migration.
-const providerGemini = "gemini"
+// ProviderGemini/ProviderOpenRouter identify providers in the persisted
+// credentials file, in settings.json, and in an agent's own agent.json
+// (see models.go) — keying by name from the start means adding another
+// provider is a new map entry and a buildModel case, not a file-format
+// migration. ProviderOpenRouter is declared ahead of having a working
+// implementation (see buildModel) specifically so credentials.go and an
+// agent.json can already refer to it by name; buildModel is what still
+// needs a real OpenRouter model.LLM behind it.
+const (
+	ProviderGemini     = "gemini"
+	ProviderOpenRouter = "openrouter"
+)
 
 // credentialsFile is provider name -> arbitrary string fields, kept
 // loose rather than a fixed per-provider struct: an API key is all
@@ -22,11 +28,11 @@ type credentialsFile struct {
 	Providers map[string]map[string]string `json:"providers"`
 }
 
-// SaveAPIKey persists apiKey as the Gemini provider's credential in
+// SaveAPIKey persists apiKey as the given provider's credential in
 // appdir's data/credentials.json, creating or updating the file. Called
 // only after a key has been proven to work (New succeeded with it) —
 // see main.go's newBackend — so a typo'd key never ends up on disk.
-func SaveAPIKey(apiKey string) error {
+func SaveAPIKey(provider, apiKey string) error {
 	path, err := dataPath("credentials.json")
 	if err != nil {
 		return fmt.Errorf("resolve credentials path: %w", err)
@@ -39,10 +45,10 @@ func SaveAPIKey(apiKey string) error {
 	if cf.Providers == nil {
 		cf.Providers = map[string]map[string]string{}
 	}
-	if cf.Providers[providerGemini] == nil {
-		cf.Providers[providerGemini] = map[string]string{}
+	if cf.Providers[provider] == nil {
+		cf.Providers[provider] = map[string]string{}
 	}
-	cf.Providers[providerGemini]["apiKey"] = apiKey
+	cf.Providers[provider]["apiKey"] = apiKey
 
 	data, err := json.MarshalIndent(cf, "", "  ")
 	if err != nil {
@@ -57,11 +63,11 @@ func SaveAPIKey(apiKey string) error {
 	return nil
 }
 
-// LoadAPIKey returns the persisted Gemini provider API key, or "" if
-// none has been saved yet — a fresh install (or one where /key has
-// never been used) has no credentials file at all, which is not an
-// error condition here.
-func LoadAPIKey() (string, error) {
+// LoadAPIKey returns the persisted API key for the given provider, or ""
+// if none has been saved yet — a fresh install (or one where /key has
+// never been used for that provider) has no credentials file, or no
+// entry for that provider, which is not an error condition here.
+func LoadAPIKey(provider string) (string, error) {
 	path, err := dataPath("credentials.json")
 	if err != nil {
 		return "", fmt.Errorf("resolve credentials path: %w", err)
@@ -70,7 +76,7 @@ func LoadAPIKey() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return cf.Providers[providerGemini]["apiKey"], nil
+	return cf.Providers[provider]["apiKey"], nil
 }
 
 func readCredentialsFile(path string) (credentialsFile, error) {

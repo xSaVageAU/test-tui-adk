@@ -63,6 +63,13 @@ func seedIfMissing(dir string) error {
 			Name:        defaultRootName,
 			Description: defaultRootDescription,
 			Tools:       defaultRootTools,
+			// Provider/Model are set explicitly (not left "") specifically
+			// so they show up in the seeded file at all — both fields are
+			// json:",omitempty", so an empty string here would vanish from
+			// the marshaled output instead of appearing as an editable
+			// "provider": "" a user could discover and change.
+			Provider: ProviderGemini,
+			Model:    DefaultModelName,
 		}
 		data, err := json.MarshalIndent(cfg, "", "  ")
 		if err != nil {

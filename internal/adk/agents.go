@@ -69,7 +69,7 @@ func buildRootAgent(ctx context.Context, apiKey string) (builtRoot, error) {
 		rootTools = append(rootTools, t)
 	}
 
-	rootModel, err := buildModel(ctx, rootCfg.Provider, rootCfg.Model, apiKey)
+	rootModel, err := buildModel(ctx, rootCfg.Provider, rootCfg.Model, geminiOverride(rootCfg.Provider, apiKey))
 	if err != nil {
 		return builtRoot{}, fmt.Errorf("create root model: %w", err)
 	}

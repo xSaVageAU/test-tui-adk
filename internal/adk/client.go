@@ -65,16 +65,15 @@ type Client struct {
 }
 
 // New builds the root agent (config-driven — see agents.go and
-// rootagent.go) and the runner backing it, from the given API key.
-// Sourcing the key (env var at startup, a value typed into the /key
-// popup, ...) is entirely the caller's concern; this just validates and
-// uses whatever it's handed. Returns an error rather than panicking so
-// the caller can decide how to degrade.
+// rootagent.go) and the runner backing it. apiKey is a Gemini key the
+// caller already has on hand (env var at startup, a value typed into
+// the /key popup, ...) — used only if the root agent (or a sub-agent)
+// actually turns out to be configured for Gemini; every other provider
+// resolves its own key from data/credentials.json instead (see
+// models.go's buildModel/geminiOverride), so an empty apiKey here isn't
+// an immediate error — it only becomes one once buildModel actually
+// needs a key it can't find.
 func New(ctx context.Context, apiKey string) (*Client, error) {
-	if apiKey == "" {
-		return nil, fmt.Errorf("no API key given")
-	}
-
 	sessSvc, err := openSessionStore()
 	if err != nil {
 		return nil, fmt.Errorf("open session store: %w", err)
