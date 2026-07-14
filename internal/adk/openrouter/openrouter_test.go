@@ -322,12 +322,17 @@ func TestStreamingTextAndToolCall(t *testing.T) {
 	}
 }
 
-// TestReasoningTextCombinesBothShapes covers reasoningText's whole job:
+// TestReasoningTextPicksOneShape covers reasoningText's whole job:
 // OpenRouter has two reasoning-output shapes (see chatMessage's doc
 // comment, confirmed against https://openrouter.ai/docs/use-cases/
-// reasoning-tokens) — a plain string and a structured array — and not
-// every reasoning-capable model populates the same one.
-func TestReasoningTextCombinesBothShapes(t *testing.T) {
+// reasoning-tokens) — a plain string and a structured array — and a
+// provider that populates both puts the *same* content in each. An
+// earlier version of this function concatenated both unconditionally;
+// live testing against several real reasoning models showed every
+// fragment of reasoning output doubled ("TheThe user user said said"),
+// confirming they're alternate representations, not additive pieces —
+// this guards against that regressing.
+func TestReasoningTextPicksOneShape(t *testing.T) {
 	cases := []struct {
 		name string
 		msg  *chatMessage
@@ -354,12 +359,12 @@ func TestReasoningTextCombinesBothShapes(t *testing.T) {
 			"visible part",
 		},
 		{
-			"both shapes present, plain field wins ordering",
+			"both shapes present with identical content, plain field wins and details are ignored",
 			&chatMessage{
-				Reasoning:        "plain first",
-				ReasoningDetails: []chatReasoningDetail{{Type: "reasoning.text", Text: " then details"}},
+				Reasoning:        "the user said hello",
+				ReasoningDetails: []chatReasoningDetail{{Type: "reasoning.text", Text: "the user said hello"}},
 			},
-			"plain first then details",
+			"the user said hello",
 		},
 	}
 	for _, c := range cases {

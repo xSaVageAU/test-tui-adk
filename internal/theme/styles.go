@@ -39,7 +39,10 @@ type Styles struct {
 	// App.reasoning); once it's done, ReasoningNote is what's left behind
 	// permanently ("thought for Xs") — quiet, same weight as MessageMeta's
 	// token-usage line, since a finished number doesn't need to keep
-	// grabbing attention the way an in-progress one does.
+	// grabbing attention the way an in-progress one does. ReasoningText is
+	// the actual reasoning content itself, shown as its own block between
+	// the label and the reply — italic and quiet (same family as
+	// MessageSystem) so it reads as distinctly not-the-answer at a glance.
 	Viewport          lipgloss.Style
 	MessageUser       lipgloss.Style
 	MessageAgent      lipgloss.Style
@@ -50,6 +53,7 @@ type Styles struct {
 	MessageUserBubble lipgloss.Style // highlighted backdrop variant for user messages
 	ReasoningBadge    lipgloss.Style
 	ReasoningNote     lipgloss.Style
+	ReasoningText     lipgloss.Style
 
 	// MessageFinish* style the note shown under an agent reply that ended
 	// on a notable non-"stop" finish reason — Warning for a benign
@@ -216,6 +220,10 @@ func New(t Theme) Styles {
 
 	s.ReasoningNote = lipgloss.NewStyle().
 		Foreground(t.TextFaint)
+
+	s.ReasoningText = lipgloss.NewStyle().
+		Foreground(t.TextFaint).
+		Italic(true)
 
 	s.MessageContent = lipgloss.NewStyle().
 		Foreground(t.Text)

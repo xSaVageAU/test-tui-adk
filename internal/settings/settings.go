@@ -51,6 +51,19 @@ type UISettings struct {
 	// (an older settings.json, or one that's simply never been changed)
 	// falls back to the first variant.
 	WorkingAnim string `json:"workingAnim"`
+	// HideReasoningText governs whether a reasoning-capable model's
+	// actual thinking output (see internal/ui/chat.go's renderMessage)
+	// is shown as its own block under the "agent" label. Stored inverted
+	// — false (shown) is the wanted default, and phrasing the field this
+	// way makes that default line up with bool's own zero value, so an
+	// older settings.json that predates this field (or simply has it
+	// omitted) naturally still shows the text rather than needing
+	// special "field absent" handling the way a field defaulting to true
+	// would. App.showReasoning (its positive form) is what the rest of
+	// the UI actually reads — see NewApp/persistSettings for the
+	// negation, kept at this one boundary rather than spreading
+	// !hideReasoningText through render code.
+	HideReasoningText bool `json:"hideReasoningText"`
 }
 
 // ModeNormal/ModeFullAuto are PermissionMode's only two valid values —

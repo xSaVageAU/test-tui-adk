@@ -150,6 +150,7 @@ func (a *App) openSettingsMenu() {
 		{id: "hitl", title: "Tool approval style", desc: a.hitlMode.String() + " — select to cycle"},
 		{id: "permission", title: "Tool approval mode", desc: a.permissionMode.String() + " — select to cycle"},
 		{id: "verbose", title: "Verbose tool output", desc: onOff(a.verboseTools)},
+		{id: "reasoning", title: "Show reasoning text", desc: onOff(a.showReasoning)},
 	}
 	a.openMenu(paletteSettings, "Settings", items)
 }
@@ -271,6 +272,8 @@ func (a *App) toggleSetting(id string) {
 		a.permissionMode = a.permissionMode.next()
 	case "verbose":
 		a.verboseTools = !a.verboseTools
+	case "reasoning":
+		a.showReasoning = !a.showReasoning
 	}
 	a.persistSettings()
 	a.refreshTranscript()
@@ -283,12 +286,13 @@ func (a *App) toggleSetting(id string) {
 func (a *App) persistSettings() {
 	s := settings.Load()
 	s.UI = settings.UISettings{
-		HighlightUser:  a.highlightUser,
-		StreamReplies:  a.streamReplies,
-		HITLMode:       a.hitlMode.String(),
-		PermissionMode: a.permissionMode.String(),
-		VerboseTools:   a.verboseTools,
-		WorkingAnim:    workingAnimNames[a.workingAnim.variant],
+		HighlightUser:     a.highlightUser,
+		StreamReplies:     a.streamReplies,
+		HITLMode:          a.hitlMode.String(),
+		PermissionMode:    a.permissionMode.String(),
+		VerboseTools:      a.verboseTools,
+		WorkingAnim:       workingAnimNames[a.workingAnim.variant],
+		HideReasoningText: !a.showReasoning,
 	}
 	_ = settings.Save(s)
 }

@@ -21,7 +21,7 @@ import (
 // at, so PgUp/PgDn can jump viewport.YOffset straight to a prompt instead
 // of scrolling a fixed page height — cheap to compute here alongside the
 // render pass instead of re-walking the content separately.
-func renderTranscript(s theme.Styles, boot BootInfo, messages []ChatMessage, width int, highlightUser, verboseTools bool) (content string, userMsgLines []int) {
+func renderTranscript(s theme.Styles, boot BootInfo, messages []ChatMessage, width int, highlightUser, verboseTools, showReasoning bool) (content string, userMsgLines []int) {
 	var sb strings.Builder
 	bootBlock := renderBootArt(s, boot, width)
 	sb.WriteString(bootBlock)
@@ -50,7 +50,7 @@ func renderTranscript(s theme.Styles, boot BootInfo, messages []ChatMessage, wid
 		writeBlock(s.MessageSystem.Render("No messages yet — say something below."), false)
 	} else {
 		for _, m := range messages {
-			startLine := writeBlock(renderMessage(s, m, width, highlightUser, verboseTools), false)
+			startLine := writeBlock(renderMessage(s, m, width, highlightUser, verboseTools, showReasoning), false)
 			if m.Role == RoleUser {
 				userMsgLines = append(userMsgLines, startLine)
 			}
@@ -59,7 +59,7 @@ func renderTranscript(s theme.Styles, boot BootInfo, messages []ChatMessage, wid
 	return sb.String(), userMsgLines
 }
 
-func renderMessage(s theme.Styles, m ChatMessage, width int, highlightUser, verboseTools bool) string {
+func renderMessage(s theme.Styles, m ChatMessage, width int, highlightUser, verboseTools, showReasoning bool) string {
 	switch m.Role {
 	case RoleUser:
 		label := s.MessageUser.Render("you")
@@ -74,8 +74,20 @@ func renderMessage(s theme.Styles, m ChatMessage, width int, highlightUser, verb
 		if badge := renderReasoningBadge(s, m); badge != "" {
 			label += "  " + badge
 		}
-		content := s.MessageContent.Width(width).Render(m.Content)
-		lines := []string{label, content}
+		lines := []string{label}
+		// Gated behind its own settings toggle (showReasoning), not
+		// verboseTools — this is proof reasoning actually happened, not
+		// routine tool chatter, so it gets its own on/off rather than
+		// riding along with an unrelated setting. The "thinking Xs"/
+		// "thought for Xs" badge above stays visible either way — that's
+		// a separate, already-useful signal on its own (see
+		// renderReasoningBadge). The transcript already scrolls, so
+		// showing a long one doesn't force itself onto the screen the
+		// way an unbounded single line would.
+		if showReasoning && m.ReasoningText != "" {
+			lines = append(lines, s.ReasoningText.Width(width).Render(m.ReasoningText))
+		}
+		lines = append(lines, s.MessageContent.Width(width).Render(m.Content))
 		if m.FinishReason != "" {
 			lines = append(lines, renderFinishReason(s, m.FinishReason))
 		}
@@ -84,7 +96,7 @@ func renderMessage(s theme.Styles, m ChatMessage, width int, highlightUser, verb
 		}
 		return lipgloss.JoinVertical(lipgloss.Left, lines...)
 	case RoleTool:
-		return renderTool(s, m.ToolName, m.ToolArgs, m.ToolResult, m.ToolStatus, m.ToolPending, verboseTools, width)
+		return renderTool(s, m.ToolName, m.ToolArgs, m.ToolResult, m.ToolStatus, m.ToolPending, verboseTools, m.Usage, width)
 	default:
 		return s.MessageEvent.Render(m.Content)
 	}
@@ -124,10 +136,20 @@ const toolGutter = "▏ "
 // was that plain colored text blended in too easily to notice a
 // conversation was blocked waiting on a decision, and that's still true
 // whether or not the rest of this entry is lean.
-func renderTool(s theme.Styles, name string, args, result map[string]any, status string, pending, verboseTools bool, width int) string {
+//
+// usage, when known, is the cost of the model call that decided to make
+// this call (see ui.ToolCall.Usage's doc comment for why it's sometimes
+// nil) — appended to the call line itself rather than gated behind
+// verboseTools, same reasoning as list_files always showing its path:
+// there's nothing "extra" about it to hide, it's a fact about the call
+// that was made, not about how much of the result to show.
+func renderTool(s theme.Styles, name string, args, result map[string]any, status string, pending, verboseTools bool, usage *TokenUsage, width int) string {
 	callLine := s.ToolGutter.Render(toolGutter) + s.ToolCallName.Render(name)
 	if argsText := formatToolArgs(name, args, verboseTools); argsText != "" {
 		callLine += s.ToolCallArgs.Render("  " + argsText)
+	}
+	if usage != nil {
+		callLine += s.MessageMeta.Render("  " + formatTokenUsage(usage))
 	}
 
 	switch {
@@ -178,9 +200,16 @@ func renderToolStatusLine(s theme.Styles, style lipgloss.Style, text string, wid
 
 // renderUsage draws the quiet per-turn token-cost line under an agent
 // reply — a running total across every model call the turn made, not
-// just its last one. See App.attachTurnUsage.
+// just its last one. See App.attachTurnUsage. Shares its plain-text
+// format with renderTool's inline usage note — a tool call's Usage
+// means the same thing (a model call's token cost), just for the one
+// call that decided to make it rather than a whole turn's running total.
 func renderUsage(s theme.Styles, u *TokenUsage) string {
-	return s.MessageMeta.Render(fmt.Sprintf("%d in · %d out · %d tokens", u.Prompt, u.Output, u.Total))
+	return s.MessageMeta.Render(formatTokenUsage(u))
+}
+
+func formatTokenUsage(u *TokenUsage) string {
+	return fmt.Sprintf("%d in · %d out · %d tokens", u.Prompt, u.Output, u.Total)
 }
 
 // renderReasoningBadge draws whatever belongs next to the "agent" label

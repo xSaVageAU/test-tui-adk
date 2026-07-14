@@ -89,7 +89,7 @@ func (a *App) insertConfirmMessage(c *ToolConfirmationRequest) {
 	if key == "" {
 		key = c.ID
 	}
-	a.upsertToolMessage(key, c.Tool, c.Args, a.pendingStatusText(), true)
+	a.upsertToolMessage(key, c.Tool, c.Args, a.pendingStatusText(), true, c.Usage)
 	a.pendingConfirmation = &pendingConfirmation{
 		id:       c.ID,
 		tool:     c.Tool,

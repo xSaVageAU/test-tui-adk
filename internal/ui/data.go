@@ -45,22 +45,29 @@ type ChatMessage struct {
 	ToolPending bool           // true only while ToolStatus is an approval request awaiting a decision
 	At          time.Time
 
-	// Usage and FinishReason are meaningful only on RoleAgent messages —
-	// the turn's accumulated token cost and, if the model's last call
-	// ended on something other than a plain "stop", a note about why. See
-	// App.attachTurnUsage.
+	// Usage is the token cost attributed to this entry: on a RoleAgent
+	// message, the turn's whole accumulated cost (see App.attachTurnUsage);
+	// on a RoleTool message, specifically the one model call that decided
+	// to make this call (see App.upsertToolMessage) — set once, at call
+	// time, and never changes afterward. FinishReason is RoleAgent-only:
+	// a note about why the model's last call in the turn ended on
+	// something other than a plain "stop".
 	Usage        *TokenUsage
 	FinishReason string
 
-	// ReasoningActive/ReasoningDuration are also RoleAgent-only — whether
-	// this message's reasoning phase (see App.reasoning) is in progress
-	// right now, and how long it took once it isn't. ReasoningDuration is
-	// live-updated once a second while ReasoningActive (App.stopwatch)
-	// and then frozen — it's deliberately never cleared back to zero once
-	// set, so "thought for Xs" stays visible under the reply as a
-	// permanent record instead of disappearing the moment reasoning ends.
+	// ReasoningActive/ReasoningDuration/ReasoningText are RoleAgent-only —
+	// whether this message's reasoning phase (see App.reasoning) is in
+	// progress right now, how long it took once it isn't, and the actual
+	// reasoning content received so far. ReasoningDuration is live-updated
+	// while ReasoningActive (App.stopwatch) and then frozen — it's
+	// deliberately never cleared back to zero once set, so "thought for
+	// Xs" stays visible under the reply as a permanent record instead of
+	// disappearing the moment reasoning ends. ReasoningText likewise stays
+	// once set — it's the actual proof reasoning happened, not just a
+	// duration a user has to take on faith.
 	ReasoningActive   bool
 	ReasoningDuration time.Duration
+	ReasoningText     string
 }
 
 // newSessionID generates a fresh conversation identifier for App to use

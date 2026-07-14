@@ -69,6 +69,7 @@ type App struct {
 	highlightUser bool // experimental: backdrop highlight behind user messages
 	streamReplies bool // token-by-token replies via Backend.Stream instead of Send
 	verboseTools  bool // false shows a one-line lean summary per tool call/result; see chat.go's formatToolArgs/formatToolResult
+	showReasoning bool // false hides ChatMessage.ReasoningText but leaves the "thinking/thought for Xs" badge alone; see settings.UISettings.HideReasoningText for why this field's polarity is flipped at the persistence boundary
 	// reasoning is true whenever the model is actively sending reasoning/
 	// thinking chunks (StreamChunk.Reasoning) rather than its real reply.
 	// Cleared the moment anything else arrives (real text, a tool call,
@@ -235,6 +236,7 @@ func NewApp(cfg AppConfig) *App {
 		highlightUser:    uiSettings.HighlightUser,
 		streamReplies:    uiSettings.StreamReplies,
 		verboseTools:     uiSettings.VerboseTools,
+		showReasoning:    !uiSettings.HideReasoningText,
 		hitlMode:         parseHITLMode(uiSettings.HITLMode),
 		permissionMode:   parsePermissionMode(uiSettings.PermissionMode),
 		inputLines:       minInputLines,
@@ -347,7 +349,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.insertConfirmMessage(msg.chunk.Confirmation)
 		case msg.chunk.ToolCall != nil:
 			cmd = a.endReasoning()
-			a.upsertToolMessage(msg.chunk.ToolCall.ID, msg.chunk.ToolCall.Name, msg.chunk.ToolCall.Args, toolStatusRunning, false)
+			a.upsertToolMessage(msg.chunk.ToolCall.ID, msg.chunk.ToolCall.Name, msg.chunk.ToolCall.Args, toolStatusRunning, false, msg.chunk.ToolCall.Usage)
 			a.workingLabel = "using " + msg.chunk.ToolCall.Name
 		case msg.chunk.ToolResult != nil:
 			a.completeToolMessage(msg.chunk.ToolResult.ID, msg.chunk.ToolResult.Name, msg.chunk.ToolResult.Result)
@@ -358,6 +360,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.turnFinishReason = msg.chunk.FinishReason
 		case msg.chunk.Reasoning != "":
 			cmd = a.startReasoning()
+			if a.streamingMsgIndex < len(a.messages) {
+				a.messages[a.streamingMsgIndex].ReasoningText += msg.chunk.Reasoning
+			}
 		default:
 			cmd = a.endReasoning()
 			a.messages[a.streamingMsgIndex].Content += msg.chunk.Text
@@ -771,14 +776,21 @@ func (a *App) attachTurnUsage() {
 //
 // On every later sighting of the same ID, only status/pending are
 // touched — args aren't overwritten, since only the initial call event
-// carries them; a confirmation event reuses them via nil.
-func (a *App) upsertToolMessage(id, name string, args map[string]any, status string, pending bool) {
+// carries them; a confirmation event reuses them via nil. usage is the
+// one exception allowed to arrive late: the backend can't always
+// attribute a tool call's cost the first time it's seen (see
+// eventstream.go's sentCallUsage), so a non-nil usage on a later
+// sighting still gets recorded even though it wasn't there originally.
+func (a *App) upsertToolMessage(id, name string, args map[string]any, status string, pending bool, usage *TokenUsage) {
 	if idx, ok := a.toolMsgIndex[id]; ok && idx < len(a.messages) {
 		a.messages[idx].ToolStatus = status
 		a.messages[idx].ToolPending = pending
+		if usage != nil {
+			a.messages[idx].Usage = usage
+		}
 		return
 	}
-	a.newToolMessage(id, ChatMessage{ToolName: name, ToolArgs: args, ToolStatus: status, ToolPending: pending, At: time.Now()})
+	a.newToolMessage(id, ChatMessage{ToolName: name, ToolArgs: args, ToolStatus: status, ToolPending: pending, Usage: usage, At: time.Now()})
 }
 
 // completeToolMessage records a finished call's raw result. Kept
@@ -868,7 +880,7 @@ func (a *App) applyTheme() {
 // keystroke, resize, and cursor blink, so it has to leave scrolling
 // alone; see followTranscript for the variant that's allowed to move it.
 func (a *App) refreshTranscript() {
-	content, userMsgLines := renderTranscript(a.styles, a.bootInfo, a.messages, a.viewport.Width, a.highlightUser, a.verboseTools)
+	content, userMsgLines := renderTranscript(a.styles, a.bootInfo, a.messages, a.viewport.Width, a.highlightUser, a.verboseTools, a.showReasoning)
 	a.viewport.SetContent(content)
 	a.userMsgLines = userMsgLines
 }

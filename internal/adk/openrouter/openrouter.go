@@ -300,18 +300,24 @@ func functionResponseContent(fr *genai.FunctionResponse) string {
 	return string(b)
 }
 
-// reasoningText combines a message/delta's two possible reasoning-output
-// shapes (see chatMessage's doc comment) into one plaintext string:
-// Reasoning as-is, plus whatever human-readable text ReasoningDetails
-// carries (reasoning.text/reasoning.summary entries; reasoning.encrypted
-// entries have nothing displayable and are skipped). Most models only
-// ever populate one of the two, but nothing stops reading both.
+// reasoningText picks whichever of a message/delta's two possible
+// reasoning-output shapes (see chatMessage's doc comment) is actually
+// populated — Reasoning if non-empty, ReasoningDetails otherwise. These
+// are two *representations of the same content*, not two additive
+// pieces of it: a provider that populates both puts the identical text
+// in each (confirmed live — reading both unconditionally, as an earlier
+// version of this function did, produced visibly duplicated reasoning
+// output, every fragment doubled). ReasoningDetails entries: only
+// reasoning.text/reasoning.summary carry human-readable content;
+// reasoning.encrypted has nothing displayable and is skipped.
 func reasoningText(m *chatMessage) string {
 	if m == nil {
 		return ""
 	}
+	if m.Reasoning != "" {
+		return m.Reasoning
+	}
 	var b strings.Builder
-	b.WriteString(m.Reasoning)
 	for _, d := range m.ReasoningDetails {
 		switch d.Type {
 		case "reasoning.text":

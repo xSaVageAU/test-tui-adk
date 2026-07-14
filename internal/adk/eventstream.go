@@ -61,6 +61,7 @@ func (c *Client) runStream(ctx context.Context, sessionID string, msg *genai.Con
 		}
 
 		seenCalls := map[string]bool{}
+		sentCallUsage := map[string]bool{} // has usage already been delivered for this call? see the FunctionCall case below
 		seenResults := map[string]bool{}
 		seenConfirmations := map[string]bool{}
 
@@ -78,13 +79,24 @@ func (c *Client) runStream(ctx context.Context, sessionID string, msg *genai.Con
 			// usage the raw provider chunk itself happened to carry (often
 			// nothing until the last one). !event.Partial isolates exactly
 			// that one event.
+			//
+			// usage is also reused below when building a ToolCall chunk:
+			// confirmed by reading base_flow.go directly that a non-partial
+			// event's UsageMetadata and any FunctionCall parts it carries
+			// belong to the exact same model call (session.Event embeds
+			// model.LLMResponse directly, so they're literally fields of
+			// one struct instance, not separately-timed values) — so this
+			// is the real cost of the call that decided on that tool call,
+			// not a guess from adjacent events.
+			var usage *ui.TokenUsage
 			if !event.Partial {
 				if u := event.UsageMetadata; u != nil {
-					if !send(ui.StreamChunk{Usage: &ui.TokenUsage{
+					usage = &ui.TokenUsage{
 						Prompt: int(u.PromptTokenCount),
 						Output: int(u.CandidatesTokenCount + u.ThoughtsTokenCount),
 						Total:  int(u.TotalTokenCount),
-					}}) {
+					}
+					if !send(ui.StreamChunk{Usage: usage}) {
 						return
 					}
 				}
@@ -136,6 +148,7 @@ func (c *Client) runStream(ctx context.Context, sessionID string, msg *genai.Con
 						Tool:       original.Name,
 						Args:       original.Args,
 						Hint:       confirmationHint(fc),
+						Usage:      usage,
 					}}) {
 						return
 					}
@@ -144,10 +157,30 @@ func (c *Client) runStream(ctx context.Context, sessionID string, msg *genai.Con
 					fc := part.FunctionCall
 					key := toolEventKey(fc.ID, fc.Name, fc.Args)
 					if seenCalls[key] {
+						// Already sent once — normally a genuine duplicate
+						// (ADK re-surfaces the same call in more than one
+						// event) and skipped. The one exception: this call
+						// was first seen in a *partial* event (Gemini can
+						// hand back a complete, non-fragmented function
+						// call within a partial chunk — confirmed by
+						// reading the raw per-chunk response ADK forwards
+						// downstream unmodified) with no usage attached
+						// yet, and this sighting — from the final
+						// aggregated event — finally has it. Resend once,
+						// carrying just the usage this time, rather than
+						// silently losing it because dedup already fired.
+						if usage == nil || sentCallUsage[key] {
+							continue
+						}
+						sentCallUsage[key] = true
+						if !send(ui.StreamChunk{ToolCall: &ui.ToolCall{ID: fc.ID, Name: fc.Name, Args: fc.Args, Usage: usage}}) {
+							return
+						}
 						continue
 					}
 					seenCalls[key] = true
-					if !send(ui.StreamChunk{ToolCall: &ui.ToolCall{ID: fc.ID, Name: fc.Name, Args: fc.Args}}) {
+					sentCallUsage[key] = usage != nil
+					if !send(ui.StreamChunk{ToolCall: &ui.ToolCall{ID: fc.ID, Name: fc.Name, Args: fc.Args, Usage: usage}}) {
 						return
 					}
 
