@@ -54,18 +54,20 @@ func TestRenderContextBar(t *testing.T) {
 }
 
 func TestJoinLeftRight(t *testing.T) {
-	if got := joinLeftRight("left", "", 20); got != "left" {
+	s := theme.New(theme.Load()[0])
+
+	if got := joinLeftRight(s, "left", "", 20); got != "left" {
 		t.Errorf("empty right: got %q, want %q", got, "left")
 	}
 
-	got := joinLeftRight("left", "right", 11)
+	got := joinLeftRight(s, "left", "right", 11)
 	if got != "left  right" {
 		t.Errorf("got %q, want %q", got, "left  right")
 	}
 
 	// Not enough room for both: right is dropped silently rather than
 	// truncated into something unreadable.
-	if got := joinLeftRight("left", "right", 5); got != "left" {
+	if got := joinLeftRight(s, "left", "right", 5); got != "left" {
 		t.Errorf("narrow width: got %q, want just %q", got, "left")
 	}
 }

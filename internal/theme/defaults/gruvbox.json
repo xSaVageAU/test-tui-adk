@@ -11,7 +11,9 @@
   "textOnFill": "#282828",
   "accent": "#fe8019",
   "accentMuted": "#d65d0e",
+  "reasoning": "#fe8019",
   "success": "#b8bb26",
   "warning": "#fabd2f",
-  "error": "#fb4934"
+  "error": "#fb4934",
+  "attention": "#fabd2f"
 }

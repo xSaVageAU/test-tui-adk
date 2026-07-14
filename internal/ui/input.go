@@ -43,13 +43,22 @@ func wrappedLines(ta textarea.Model) int {
 
 // applyInputStyles repaints the textarea from the given theme. Called once
 // at construction and again on every theme swap.
+//
+// Base/CursorLine/Text carry Background(Surface) directly — built here
+// rather than through dedicated theme.Styles fields, matching
+// InputBar/InputPrompt/InputHint's box, all Surface for the same
+// reason: the textarea's own content area needs to visually read as
+// part of the same raised panel as its border, not a gap of a
+// different background sitting inside it. No line-highlight band on
+// CursorLine; this isn't a code editor.
 func applyInputStyles(ta *textarea.Model, s theme.Styles) {
+	surface := lipgloss.NewStyle().Background(s.Theme.Surface)
 	style := textarea.Style{
-		Base:        lipgloss.NewStyle(),
-		CursorLine:  lipgloss.NewStyle(), // no line-highlight band; this isn't a code editor
+		Base:        surface,
+		CursorLine:  surface,
 		Placeholder: s.InputHint,
 		Prompt:      s.InputPrompt,
-		Text:        s.MessageContent,
+		Text:        surface.Foreground(s.Theme.Text),
 	}
 	ta.FocusedStyle = style
 	ta.BlurredStyle = style

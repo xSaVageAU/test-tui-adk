@@ -72,7 +72,7 @@ func renderMessage(s theme.Styles, m ChatMessage, width int, highlightUser, verb
 	case RoleAgent:
 		label := s.MessageAgent.Render("agent")
 		if badge := renderReasoningBadge(s, m); badge != "" {
-			label += "  " + badge
+			label += s.MessageContent.Render("  ") + badge
 		}
 		lines := []string{label}
 		// Gated behind its own settings toggle (showReasoning), not
@@ -143,7 +143,7 @@ func renderTool(s theme.Styles, name string, args, result map[string]any, status
 	case result != nil:
 		text := formatToolResult(name, result, verboseTools)
 		if !verboseTools {
-			return callLine + "  " + s.ToolResult.Render(text)
+			return callLine + s.MessageContent.Render("  ") + s.ToolResult.Render(text)
 		}
 		return callLine + "\n" + renderToolStatusLine(s, s.ToolResult, text, width)
 	case pending:
@@ -157,7 +157,7 @@ func renderTool(s theme.Styles, name string, args, result map[string]any, status
 			statusStyle = s.ToolConfirmDenied
 		}
 		if !verboseTools {
-			return callLine + "  " + statusStyle.Render(status)
+			return callLine + s.MessageContent.Render("  ") + statusStyle.Render(status)
 		}
 		return callLine + "\n" + renderToolStatusLine(s, statusStyle, status, width)
 	default:

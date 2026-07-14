@@ -59,8 +59,14 @@ func renderBootArt(s theme.Styles, info BootInfo, width int) string {
 	box := s.BootBorder.Render(content)
 	// Centered rather than flush left — it's meant to read as a one-time
 	// splash card, visually distinct from the left-aligned chat log below
-	// it once the conversation gets going.
-	return lipgloss.PlaceHorizontal(width, lipgloss.Center, box)
+	// it once the conversation gets going. WithWhitespaceBackground so the
+	// margin PlaceHorizontal adds on either side carries the app's
+	// background instead of the terminal's raw default — this content
+	// already sits at its full target width by the time it reaches
+	// App.viewport, so viewport.Style's own per-line repaint (see
+	// App.layout/applyTheme) never gets a chance to add that padding
+	// itself.
+	return lipgloss.PlaceHorizontal(width, lipgloss.Center, box, lipgloss.WithWhitespaceBackground(s.Theme.Background))
 }
 
 // bootRow renders one "label   value" line, the label at its natural

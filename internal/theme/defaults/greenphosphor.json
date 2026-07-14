@@ -1,0 +1,19 @@
+{
+  "name": "Green Phosphor",
+  "background": "#0a0f0a",
+  "surface": "#0f1a0f",
+  "highlight": "#123317",
+  "border": "#1f3d1f",
+  "borderFocus": "#33ff33",
+  "text": "#33ff33",
+  "textMuted": "#23b323",
+  "textFaint": "#146414",
+  "textOnFill": "#001a00",
+  "accent": "#39ff14",
+  "accentMuted": "#1f8f1f",
+  "reasoning": "#00ffaa",
+  "success": "#39ff14",
+  "warning": "#ffcc00",
+  "error": "#ff3333",
+  "attention": "#ffaa00"
+}

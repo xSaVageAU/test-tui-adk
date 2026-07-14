@@ -38,9 +38,24 @@ type Theme struct {
 	// Brand / accent
 	Accent      lipgloss.Color `json:"accent"`
 	AccentMuted lipgloss.Color `json:"accentMuted"`
+	// Reasoning is the model's "thinking" badge (see Styles.ReasoningBadge)
+	// — split out from Accent so a theme can give that indicator its own
+	// hue instead of it always matching every other branded/interactive
+	// element in the app.
+	Reasoning lipgloss.Color `json:"reasoning"`
 
 	// Status
 	Success lipgloss.Color `json:"success"`
 	Warning lipgloss.Color `json:"warning"`
 	Error   lipgloss.Color `json:"error"`
+
+	// Attention marks tool activity and an active toggle (see
+	// Styles.ToolCallName/ToolConfirmPending/HelpBadge) — "something
+	// notable or in progress," not literally a warning, so it's its own
+	// token rather than continuing to borrow Warning for a meaning
+	// Warning doesn't actually have. Kept as one token rather than a
+	// separate one per widget so all of that chrome moves together —
+	// tool badges and active-toggle badges were always meant to read as
+	// the same family of indicator.
+	Attention lipgloss.Color `json:"attention"`
 }

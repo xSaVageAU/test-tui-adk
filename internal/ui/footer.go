@@ -19,7 +19,15 @@ import (
 // own badge while that setting is currently on, so the footer doubles
 // as a quiet indicator of which toggles are active — not just a legend
 // of what the keys do.
-func renderHelpFooter(s theme.Styles, autoAccept, verboseTools bool) string {
+//
+// The gap between badges is rendered through HeaderTitle (a background
+// on the app's own color, same reasoning as header.go's joinLeftRight),
+// not a bare " " literal — each badge is already fully rendered with
+// its own reset, so an unstyled separator between them would show the
+// terminal's raw default rather than the theme's background. The whole
+// line is then padded out to width for the same reason: past the last
+// badge, there's nothing else claiming that background either.
+func renderHelpFooter(s theme.Styles, autoAccept, verboseTools bool, width int) string {
 	groups := []struct {
 		b      key.Binding
 		active bool
@@ -38,5 +46,6 @@ func renderHelpFooter(s theme.Styles, autoAccept, verboseTools bool) string {
 		badge := s.HelpBadge(g.active)
 		badges[i] = badge.Key.Render(h.Key) + badge.Desc.Render(" "+h.Desc)
 	}
-	return strings.Join(badges, " ")
+	gap := s.HeaderTitle.Render(" ")
+	return s.HeaderTitle.Width(width).Render(strings.Join(badges, gap))
 }

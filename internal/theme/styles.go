@@ -32,8 +32,10 @@ type Styles struct {
 	// for actual system events (agent switched, key set, errors, ...) —
 	// those want to stand out, not blend in. ReasoningBadge/ReasoningNote
 	// sit next to the "agent" label (see chat.go's renderMessage) —
-	// ReasoningBadge is a filled, eye-catching treatment (same weight as
-	// ToolCallName/ToolConfirmPending) shown only while the model is
+	// ReasoningBadge is a filled, eye-catching treatment — Theme.Reasoning,
+	// its own token rather than Accent/Attention, so a theme can give
+	// "thinking" a hue distinct from both branding and tool/toggle
+	// chrome — shown only while the model is
 	// actively sending reasoning/thinking output (see App.reasoning);
 	// once it's done, ReasoningNote is what's left behind permanently
 	// ("thought for Xs") — quiet (just TextFaint, no fill), since a
@@ -65,8 +67,8 @@ type Styles struct {
 	// Tool activity renders as a colored left gutter bar (like a
 	// blockquote marker) with the call and its result grouped tight
 	// beneath it (or, in lean mode, on the same line) — see renderTool
-	// in chat.go. ToolCallName is a filled badge, same Warning-colored
-	// treatment as ToolConfirmPending, so a tool call reads as a
+	// in chat.go. ToolCallName is a filled badge, Theme.Attention-colored
+	// — same as ToolConfirmPending — so a tool call reads as a
 	// distinct event at a glance rather than just bold text
 	// blending into the surrounding gutter.
 	ToolGutter   lipgloss.Style // the "▏" bar itself
@@ -128,12 +130,13 @@ type Styles struct {
 	// HelpBadge styles one "key desc" pill in the bottom help footer (see
 	// footer.go's renderHelpFooter) — one shared background per badge
 	// (dim by default, a quiet grouping cue rather than something meant
-	// to compete with the chat above it; the same Warning-filled
-	// treatment as ToolConfirmPending while a toggle bind's own setting —
-	// AutoAccept, VerboseTools — is currently on, so the footer doubles
-	// as a quiet indicator of which toggles are active — the only such
-	// indicator now that the top bar no longer shows one). Key renders a
-	// shade darker than Desc within that shared
+	// to compete with the chat above it; Theme.Attention-filled — same
+	// token as ToolCallName/ToolConfirmPending, one shared "notable/
+	// active" family — while a toggle bind's own setting — AutoAccept,
+	// VerboseTools — is currently on, so the footer doubles as a quiet
+	// indicator of which toggles are active — the only such indicator
+	// now that the top bar no longer shows one). Key renders a shade
+	// darker than Desc within that shared
 	// fill — see HelpBadgeStyle's own doc comment — which is the only
 	// thing distinguishing the two; a from-scratch two-tone (separate
 	// background per half) was tried and looked worse, not better, per
@@ -172,13 +175,26 @@ func New(t Theme) Styles {
 		Foreground(t.Text)
 
 	s.Header = lipgloss.NewStyle().
+		Background(t.Background).
 		Foreground(t.TextMuted).
 		Padding(0, 1)
 
 	s.HeaderRule = lipgloss.NewStyle().
+		Background(t.Background).
 		Foreground(t.Border)
 
+	// HeaderTitle also backs every plain connector fragment inside a
+	// composite line built by concatenating several separately-rendered
+	// styles side by side (the top bar's meta/context-bar gap — see
+	// header.go's joinLeftRight — and HelpBadgeStyle's own gaps). Giving
+	// it an explicit Background matters more here than almost anywhere
+	// else: wrapping an *already-rendered* composite string in one more
+	// outer background afterward does not work — each fragment's own
+	// trailing reset code cuts off anything after it in the same
+	// Render() call, so a background has to be set on every individual
+	// fragment, not just the thing that joins them.
 	s.HeaderTitle = lipgloss.NewStyle().
+		Background(t.Background).
 		Foreground(t.TextFaint)
 
 	s.HeaderSession = lipgloss.NewStyle().
@@ -200,28 +216,43 @@ func New(t Theme) Styles {
 	}
 
 	s.HeaderContextBar = func(frac float64) lipgloss.Style {
+		// Background matters here specifically because "░" (the bar's
+		// empty portion) is a partial-coverage glyph — its own gaps would
+		// otherwise show the terminal's raw background instead of ours,
+		// unlike "█" which fills its whole cell regardless.
+		base := lipgloss.NewStyle().Background(t.Background)
 		switch {
 		case frac >= 0.9:
-			return lipgloss.NewStyle().Foreground(t.Error)
+			return base.Foreground(t.Error)
 		case frac >= 0.7:
-			return lipgloss.NewStyle().Foreground(t.Warning)
+			return base.Foreground(t.Warning)
 		default:
-			return lipgloss.NewStyle().Foreground(t.Success)
+			return base.Foreground(t.Success)
 		}
 	}
 
+	// Viewport is applied directly to the bubbles/viewport.Model itself
+	// (see App.layout/applyTheme), not composed here like everything
+	// else — it's what makes the chat area's own internal blank-fill
+	// rows (shorter transcripts than the viewport's height) carry the
+	// background instead of showing the terminal's raw default below the
+	// last message.
 	s.Viewport = lipgloss.NewStyle().
+		Background(t.Background).
 		Foreground(t.Text)
 
 	s.MessageUser = lipgloss.NewStyle().
+		Background(t.Background).
 		Foreground(t.Accent).
 		Bold(true)
 
 	s.MessageAgent = lipgloss.NewStyle().
+		Background(t.Background).
 		Foreground(t.TextMuted).
 		Bold(true)
 
 	s.MessageSystem = lipgloss.NewStyle().
+		Background(t.Background).
 		Foreground(t.TextFaint).
 		Italic(true)
 
@@ -232,19 +263,22 @@ func New(t Theme) Styles {
 		Padding(0, 1)
 
 	s.ReasoningBadge = lipgloss.NewStyle().
-		Background(t.Accent).
+		Background(t.Reasoning).
 		Foreground(t.TextOnFill).
 		Bold(true).
 		Padding(0, 1)
 
 	s.ReasoningNote = lipgloss.NewStyle().
+		Background(t.Background).
 		Foreground(t.TextFaint)
 
 	s.ReasoningText = lipgloss.NewStyle().
+		Background(t.Background).
 		Foreground(t.TextFaint).
 		Italic(true)
 
 	s.MessageContent = lipgloss.NewStyle().
+		Background(t.Background).
 		Foreground(t.Text)
 
 	s.MessageUserBubble = lipgloss.NewStyle().
@@ -253,36 +287,43 @@ func New(t Theme) Styles {
 		Padding(0, 1)
 
 	s.MessageFinishWarning = lipgloss.NewStyle().
+		Background(t.Background).
 		Foreground(t.Warning)
 
 	s.MessageFinishBlocked = lipgloss.NewStyle().
+		Background(t.Background).
 		Foreground(t.Error).
 		Bold(true)
 
 	s.ToolGutter = lipgloss.NewStyle().
-		Foreground(t.Warning)
+		Background(t.Background).
+		Foreground(t.Attention)
 
 	s.ToolCallName = lipgloss.NewStyle().
-		Background(t.Warning).
+		Background(t.Attention).
 		Foreground(t.TextOnFill).
 		Bold(true).
 		Padding(0, 1)
 
 	s.ToolCallArgs = lipgloss.NewStyle().
+		Background(t.Background).
 		Foreground(t.TextMuted)
 
 	s.ToolResult = lipgloss.NewStyle().
+		Background(t.Background).
 		Foreground(t.TextFaint)
 
 	s.ToolConfirmPending = lipgloss.NewStyle().
-		Background(t.Warning).
+		Background(t.Attention).
 		Foreground(t.TextOnFill).
 		Bold(true)
 
 	s.ToolConfirmApproved = lipgloss.NewStyle().
+		Background(t.Background).
 		Foreground(t.Success)
 
 	s.ToolConfirmDenied = lipgloss.NewStyle().
+		Background(t.Background).
 		Foreground(t.Error)
 
 	s.StickyPrompt = lipgloss.NewStyle().
@@ -293,6 +334,7 @@ func New(t Theme) Styles {
 	s.BootBorder = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.Accent).
+		BorderBackground(t.Background).
 		Background(t.Surface).
 		Padding(1, 2)
 
@@ -318,26 +360,41 @@ func New(t Theme) Styles {
 		Background(t.Surface).
 		Bold(true)
 
+	// Background(Surface), not Background: Theme's own doc comment already
+	// calls the input bar out as one of Surface's "slightly raised panel"
+	// examples — this is that promise actually being kept. InputPrompt/
+	// InputHint get the same Surface background (see input.go's
+	// applyInputStyles, which feeds these into the textarea's own Base/
+	// Text styles) so the box reads as one consistent panel rather than
+	// its border being Surface-colored while its actual text sits on a
+	// different background underneath.
 	s.InputBar = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.Border).
+		BorderBackground(t.Background).
+		Background(t.Surface).
 		Padding(0, 1)
 
 	s.InputBarFocused = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.BorderFocus).
+		BorderBackground(t.Background).
+		Background(t.Surface).
 		Padding(0, 1)
 
 	s.InputPrompt = lipgloss.NewStyle().
+		Background(t.Surface).
 		Foreground(t.Accent).
 		Bold(true)
 
 	s.InputHint = lipgloss.NewStyle().
+		Background(t.Surface).
 		Foreground(t.TextFaint)
 
 	s.PaletteBorder = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.BorderFocus).
+		BorderBackground(t.Background).
 		Background(t.Surface).
 		Padding(1, 2)
 
@@ -366,6 +423,7 @@ func New(t Theme) Styles {
 	s.Suggestions = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.Border).
+		BorderBackground(t.Background).
 		Background(t.Surface).
 		Padding(0, 1)
 
@@ -390,7 +448,7 @@ func New(t Theme) Styles {
 	s.HelpBadge = func(active bool) HelpBadgeStyle {
 		bg, keyFg, descFg := t.Surface, t.TextFaint, t.TextMuted
 		if active {
-			bg, keyFg, descFg = t.Warning, t.TextOnFill, t.TextOnFill
+			bg, keyFg, descFg = t.Attention, t.TextOnFill, t.TextOnFill
 		}
 		keyStyle := lipgloss.NewStyle().Background(bg).Foreground(keyFg).Padding(0, 0, 0, 1)
 		descStyle := lipgloss.NewStyle().Background(bg).Foreground(descFg).Padding(0, 1, 0, 0)

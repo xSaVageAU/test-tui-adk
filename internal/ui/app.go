@@ -872,6 +872,7 @@ func (a *App) applyTheme() {
 	// menu, cancelMenu reverting a preview) goes through here, so this
 	// is the one place that needs to know about BootInfo.Theme at all.
 	a.bootInfo.Theme = a.themeMgr.Current().Name
+	a.viewport.Style = a.styles.Viewport
 	applyInputStyles(&a.input, a.styles)
 	if a.paletteKind != paletteNone {
 		restylePalette(&a.paletteList, a.styles)
@@ -979,6 +980,7 @@ func (a *App) layout() {
 	if a.viewport.Width == 0 {
 		a.viewport = viewport.New(a.width, vpHeight)
 		a.viewport.MouseWheelDelta = 2 // a bit faster than 1, still finer than the 3-line default
+		a.viewport.Style = a.styles.Viewport
 	} else {
 		a.viewport.Width = a.width
 		a.viewport.Height = vpHeight
@@ -1009,12 +1011,12 @@ func (a *App) View() string {
 	if sticky := a.stickyPromptOverlay(); sticky != "" {
 		body = overlay(body, sticky, 0, 0, a.viewport.Width)
 	}
-	workingAnimBlock := blankWorkingAnim()
+	workingAnimBlock := blankWorkingAnim(a.styles.Theme, a.width)
 	if a.workingAnimShouldRun() {
 		workingAnimBlock = a.workingAnim.render(a.styles.Theme, a.width, a.workingLabel)
 	}
 	inputBar := renderInputBar(a.styles, a.input, a.width, a.inputLines, true)
-	footer := renderHelpFooter(a.styles, a.permissionMode == permissionFullAuto, a.verboseTools)
+	footer := renderHelpFooter(a.styles, a.permissionMode == permissionFullAuto, a.verboseTools, a.width)
 
 	parts := []string{topBar, body}
 	if len(a.suggestMatches) > 0 {

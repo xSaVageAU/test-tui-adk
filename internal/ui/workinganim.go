@@ -128,8 +128,9 @@ func (w *workingAnimState) render(t theme.Theme, width int, label string) string
 	}
 
 	lines := strings.Split(out, "\n")
+	blank := blankAnimLine(t, width)
 	for len(lines) < workingAnimHeight {
-		lines = append([]string{""}, lines...)
+		lines = append([]string{blank}, lines...)
 	}
 	if len(lines) > workingAnimHeight {
 		lines = lines[len(lines)-workingAnimHeight:]
@@ -137,11 +138,25 @@ func (w *workingAnimState) render(t theme.Theme, width int, label string) string
 	return strings.Join(lines, "\n")
 }
 
+// blankAnimLine is one width-wide, background-painted but otherwise
+// empty row — used both by render (padding a short variant up to
+// workingAnimHeight) and blankWorkingAnim (the whole reserved block
+// while idle). A bare "" here would leave the terminal's raw default
+// background showing through instead of the theme's.
+func blankAnimLine(t theme.Theme, width int) string {
+	return lipgloss.NewStyle().Background(t.Background).Width(width).Render("")
+}
+
 // blankWorkingAnim is what occupies the reserved rows while nothing is
-// actively running — workingAnimHeight empty lines, so the layout never
-// shifts when a turn starts or ends.
-func blankWorkingAnim() string {
-	return strings.Repeat("\n", workingAnimHeight-1)
+// actively running — workingAnimHeight blank (but background-painted)
+// lines, so the layout never shifts when a turn starts or ends.
+func blankWorkingAnim(t theme.Theme, width int) string {
+	line := blankAnimLine(t, width)
+	lines := make([]string, workingAnimHeight)
+	for i := range lines {
+		lines[i] = line
+	}
+	return strings.Join(lines, "\n")
 }
 
 // ─────────────────────────────────────────────

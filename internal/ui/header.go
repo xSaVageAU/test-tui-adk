@@ -39,7 +39,7 @@ func renderTopBar(s theme.Styles, width int, sessionID string, contextUsed, cont
 	// that width, so the content area actually available for meta+bar is
 	// 4 narrower than width, not 2.
 	contentWidth := max(width-4, 0)
-	content := joinLeftRight(meta, renderContextBar(s, contextUsed, contextWindow), contentWidth)
+	content := joinLeftRight(s, meta, renderContextBar(s, contextUsed, contextWindow), contentWidth)
 
 	line := s.Header.Width(width - 2).Render(content)
 	rule := s.HeaderRule.Render(strings.Repeat("─", width))
@@ -47,11 +47,19 @@ func renderTopBar(s theme.Styles, width int, sessionID string, contextUsed, cont
 }
 
 // joinLeftRight places right at the far end of a width-wide line, left
-// at the near end, with the gap between filled with spaces — or, if
-// left alone already fills width (a narrow terminal), just left with
-// right silently dropped rather than truncated into something
-// unreadable. right == "" also just returns left unchanged.
-func joinLeftRight(left, right string, width int) string {
+// at the near end, with the gap between filled with background-colored
+// spaces — or, if left alone already fills width (a narrow terminal),
+// just left with right silently dropped rather than truncated into
+// something unreadable. right == "" also just returns left unchanged.
+//
+// The gap is rendered through a style, not a bare string literal: left
+// and right are each already fully rendered (with their own resets), so
+// a raw, unstyled gap between them would show the terminal's default
+// background rather than the theme's — wrapping the *whole* line in a
+// background afterward doesn't fix that, since each side's own trailing
+// reset code cuts the outer background off from reaching this gap. See
+// theme.Styles.HeaderTitle's doc comment for the same issue in miniature.
+func joinLeftRight(s theme.Styles, left, right string, width int) string {
 	if right == "" {
 		return left
 	}
@@ -59,7 +67,7 @@ func joinLeftRight(left, right string, width int) string {
 	if gap < 1 {
 		return left
 	}
-	return left + strings.Repeat(" ", gap) + right
+	return left + s.HeaderTitle.Render(strings.Repeat(" ", gap)) + right
 }
 
 // contextBarWidth is the fixed number of filled/empty block characters

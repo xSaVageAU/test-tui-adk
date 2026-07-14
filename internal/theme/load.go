@@ -25,7 +25,7 @@ var defaultsFS embed.FS
 // isn't the order this app wants — Mono first, since it's the theme
 // active on a fresh launch (see Manager.NewManager, which always starts
 // on index 0).
-var defaultThemeOrder = []string{"mono", "vibrant", "nord", "dracula", "gruvbox", "tokyonight"}
+var defaultThemeOrder = []string{"mono", "vibrant", "nord", "dracula", "gruvbox", "tokyonight", "greenphosphor"}
 
 // Load returns every available theme: the built-ins embedded in the
 // binary, in defaultThemeOrder, followed by any custom themes found in
@@ -141,9 +141,11 @@ func (t Theme) validate() error {
 		{"textOnFill", t.TextOnFill},
 		{"accent", t.Accent},
 		{"accentMuted", t.AccentMuted},
+		{"reasoning", t.Reasoning},
 		{"success", t.Success},
 		{"warning", t.Warning},
 		{"error", t.Error},
+		{"attention", t.Attention},
 	}
 	for _, f := range fields {
 		if f.value == "" {

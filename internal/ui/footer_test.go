@@ -54,7 +54,7 @@ func TestRenderHelpFooterAlwaysShowsEveryBinding(t *testing.T) {
 	s := theme.New(theme.Load()[0])
 	for _, autoAccept := range []bool{false, true} {
 		for _, verboseTools := range []bool{false, true} {
-			got := renderHelpFooter(s, autoAccept, verboseTools)
+			got := renderHelpFooter(s, autoAccept, verboseTools, 200)
 			if !strings.Contains(got, "auto-accept") || !strings.Contains(got, "verbose tools") || !strings.Contains(got, "quit") {
 				t.Errorf("autoAccept=%v verboseTools=%v: footer missing a binding: %q", autoAccept, verboseTools, got)
 			}
@@ -64,7 +64,7 @@ func TestRenderHelpFooterAlwaysShowsEveryBinding(t *testing.T) {
 
 func TestRenderHelpFooterContainsAllBindings(t *testing.T) {
 	s := theme.New(theme.Load()[0])
-	got := renderHelpFooter(s, false, false)
+	got := renderHelpFooter(s, false, false, 200)
 
 	for _, want := range []string{"enter", "send", "/", "commands", "pgup/pgdn", "shift+tab", "auto-accept", "f2", "verbose tools", "ctrl+c", "quit"} {
 		if !strings.Contains(got, want) {
