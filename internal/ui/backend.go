@@ -38,6 +38,14 @@ type Backend interface {
 	// picker. Listing is metadata-only (ID + last-updated time); it does
 	// not include a session's messages.
 	ListSessions(ctx context.Context) ([]SessionSummary, error)
+
+	// ModelName and Specialists report the root agent's resolved model
+	// and the sub-agents it loaded — read once at startup and again
+	// after every successful reconnect (a fresh /key, or /agents saving
+	// a config change) so the boot banner reflects whichever backend is
+	// actually live instead of what was true when the app first opened.
+	ModelName() string
+	Specialists() []string
 }
 
 // SessionSummary is one entry in Backend.ListSessions' result.

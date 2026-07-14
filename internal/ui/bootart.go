@@ -13,14 +13,17 @@ import (
 // to read like a compact splash card, not stretch edge to edge.
 const bootMaxWidth = 60
 
-// BootInfo is the snapshot of startup conditions shown once in the boot
-// banner. Frozen at NewApp time and never updated afterward — this is a
-// splash screen, a record of what things looked like at launch, not a
-// live status widget (that's what the top bar is for). There's no Agent
-// field: with agent-as-tool as the only delegation pattern, there's
-// exactly one voice in every conversation, so naming it here would just
-// be trivia, not information — the header already shows it once, which
-// is enough.
+// BootInfo backs the boot banner. Seeded at NewApp time, then kept in
+// sync afterward — Model/Specialists on every successful backend
+// reconnect (see the keySetMsg handler in Update), Theme on every theme
+// change (see applyTheme) — so the banner reflects current reality
+// rather than being a frozen record of launch conditions; it just still
+// only appears once, at the top of the transcript, rather than being a
+// live status widget in its own right (that's what the top bar is for).
+// There's no Agent field: with agent-as-tool as the only delegation
+// pattern, there's exactly one voice in every conversation, so naming it
+// here would just be trivia, not information — the header already shows
+// it once, which is enough.
 type BootInfo struct {
 	Model       string // "" if unknown
 	Theme       string

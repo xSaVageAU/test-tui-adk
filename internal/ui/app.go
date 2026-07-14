@@ -40,7 +40,7 @@ type App struct {
 	styles     theme.Styles
 	backend    Backend        // nil until a key is set; see NewApp and /key
 	newBackend BackendFactory // builds a Backend from a key typed into /key; nil disables /key
-	bootInfo   BootInfo       // frozen at construction; see bootart.go
+	bootInfo   BootInfo       // seeded at construction, kept live afterward; see bootart.go
 
 	// sessionID identifies this run's conversation to the backend — a
 	// fresh one generated per launch (see newSessionID), so restarting
@@ -294,6 +294,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		a.backend = msg.backend
+		a.bootInfo.Model = msg.backend.ModelName()
+		a.bootInfo.Specialists = msg.backend.Specialists()
 		if msg.successMsg != "" {
 			a.systemMessage(msg.successMsg)
 		} else {
@@ -675,6 +677,11 @@ func (a *App) dropEmptyStreamingPlaceholder() {
 
 func (a *App) applyTheme() {
 	a.styles = a.themeMgr.Styles()
+	// Keeps the boot banner's "theme" row in sync too — every caller
+	// (a real /theme confirm, a live preview while arrowing through the
+	// menu, cancelMenu reverting a preview) goes through here, so this
+	// is the one place that needs to know about BootInfo.Theme at all.
+	a.bootInfo.Theme = a.themeMgr.Current().Name
 	applyInputStyles(&a.input, a.styles)
 	if a.paletteKind != paletteNone {
 		restylePalette(&a.paletteList, a.styles)
