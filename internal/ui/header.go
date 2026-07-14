@@ -35,13 +35,15 @@ import (
 func renderTopBar(s theme.Styles, width int, sessionID string, contextUsed, contextWindow int) string {
 	meta := s.HeaderSession.Render(shortSessionID(sessionID))
 
-	// s.Header.Width(width-2) below applies its own Padding(0,1) inside
-	// that width, so the content area actually available for meta+bar is
-	// 4 narrower than width, not 2.
-	contentWidth := max(width-4, 0)
+	// s.Header.Width(width) below renders at the terminal's full width —
+	// matching the viewport below it, so there's no gap on the right
+	// where the background stops short of the true edge — with its own
+	// Padding(0,1) applied inside that, so the content area actually
+	// available for meta+bar is 2 narrower than width, not width itself.
+	contentWidth := max(width-2, 0)
 	content := joinLeftRight(s, meta, renderContextBar(s, contextUsed, contextWindow), contentWidth)
 
-	line := s.Header.Width(width - 2).Render(content)
+	line := s.Header.Width(width).Render(content)
 	rule := s.HeaderRule.Render(strings.Repeat("─", width))
 	return line + "\n" + rule
 }

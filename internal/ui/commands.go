@@ -52,7 +52,9 @@ func matchCommands(query string) []commandSpec {
 // the input bar — a compact, single-line-per-command list, distinct from
 // the full-screen popup a selected command may itself go on to open.
 func renderSuggestions(s theme.Styles, matches []commandSpec, selected, width int) string {
-	// Inner content width: box width minus its own left/right padding.
+	// Inner content width: box width (the full terminal width — matching
+	// the viewport below it, not width-2, which left a right-edge gap)
+	// minus its own border (2) and left/right padding (2).
 	rowWidth := max(width-2-2, 0)
 
 	rows := make([]string, len(matches))
@@ -66,7 +68,7 @@ func renderSuggestions(s theme.Styles, matches []commandSpec, selected, width in
 		left := s.SuggestionItem.Render(" " + name)
 		rows[i] = left + s.SuggestionDesc.Width(max(rowWidth-lipgloss.Width(left), 0)).Render("  "+c.Desc)
 	}
-	return s.Suggestions.Width(width - 2).Render(strings.Join(rows, "\n"))
+	return s.Suggestions.Width(width).Render(strings.Join(rows, "\n"))
 }
 
 // runCommand dispatches a slash command typed into the input (the leading
