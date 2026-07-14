@@ -314,12 +314,32 @@ func toolsToChatTools(tools []*genai.Tool) []chatTool {
 				Function: chatFunction{
 					Name:        fd.Name,
 					Description: fd.Description,
-					Parameters:  schemaToJSONSchema(fd.Parameters),
+					Parameters:  parametersSchema(fd),
 				},
 			})
 		}
 	}
 	return out
+}
+
+// parametersSchema prefers fd.ParametersJsonSchema over fd.Parameters —
+// ADK's own functiontool package (github.com/google/jsonschema-go under
+// the hood) populates ParametersJsonSchema, not the genai.Schema-typed
+// Parameters field, for every tool this app builds. Using only
+// schemaToJSONSchema(fd.Parameters) meant every tool's schema silently
+// resolved to the "no parameters" default below — the tool's name and
+// description came through fine, but path/content/etc. never did,
+// which is exactly the bug a model hit live: it had no declared
+// parameters to work from and had to guess "path" from the prose
+// description, then learn the real shape from a validation error.
+// ParametersJsonSchema is returned as-is (an `any`, concretely a
+// *jsonschema.Schema) rather than converted into a map — it already
+// marshals to correct, OpenAI-compatible JSON Schema on its own.
+func parametersSchema(fd *genai.FunctionDeclaration) any {
+	if fd.ParametersJsonSchema != nil {
+		return fd.ParametersJsonSchema
+	}
+	return schemaToJSONSchema(fd.Parameters)
 }
 
 // schemaToJSONSchema converts a genai.Schema to a plain JSON Schema map

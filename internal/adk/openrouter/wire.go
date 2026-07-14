@@ -62,9 +62,15 @@ type chatTool struct {
 }
 
 type chatFunction struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description,omitempty"`
-	Parameters  map[string]any `json:"parameters,omitempty"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	// Parameters is `any`, not map[string]any: it usually holds a
+	// *jsonschema.Schema straight from ADK's own functiontool package
+	// (see parametersSchema in openrouter.go) — that type marshals
+	// itself correctly via its own MarshalJSON, and round-tripping it
+	// through a map first would be pure overhead. The map[string]any
+	// fallback path (schemaToJSONSchema) marshals fine here too.
+	Parameters any `json:"parameters,omitempty"`
 }
 
 type chatUsage struct {

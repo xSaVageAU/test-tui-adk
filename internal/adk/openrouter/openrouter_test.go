@@ -10,7 +10,9 @@ import (
 
 	"google.golang.org/genai"
 
+	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/model"
+	"google.golang.org/adk/v2/tool/functiontool"
 )
 
 // withServer points chatCompletionsURL at an httptest.Server for the
@@ -97,8 +99,9 @@ func TestNonStreamingToolCall(t *testing.T) {
 		if len(req.Tools) != 1 || req.Tools[0].Function.Name != "read_file" {
 			t.Fatalf("unexpected tools: %+v", req.Tools)
 		}
-		if params := req.Tools[0].Function.Parameters; params["type"] != "object" {
-			t.Errorf("schema type = %v, want lowercase object", params["type"])
+		params, ok := req.Tools[0].Function.Parameters.(map[string]any)
+		if !ok || params["type"] != "object" {
+			t.Errorf("schema params = %#v, want a map with type=object", req.Tools[0].Function.Parameters)
 		}
 		json.NewEncoder(w).Encode(chatResponse{
 			Choices: []chatChoice{{
@@ -180,6 +183,67 @@ func TestRequestTranslatesToolRoundTrip(t *testing.T) {
 	result := seen.Messages[2]
 	if result.Role != "tool" || result.ToolCallID != "call_1" {
 		t.Fatalf("unexpected tool-result message: %+v", result)
+	}
+}
+
+// readFileArgs mirrors internal/adk/tools.go's real readFileArgs shape
+// closely enough to reproduce the bug this test guards against: ADK's
+// functiontool package populates FunctionDeclaration.ParametersJsonSchema
+// (inferred from this struct's tags via github.com/google/jsonschema-go),
+// never the genai.Schema-typed Parameters field. A live model hit this
+// for real — every tool's declared schema resolved to an empty "no
+// parameters" object, so it had no way to know "path" was a real,
+// required argument until a validation error told it so.
+type readFileArgs struct {
+	Path string `json:"path" jsonschema:"the file to read"`
+}
+
+// TestParametersSchemaUsesFunctionToolSchema verifies toolsToChatTools
+// reads the schema functiontool actually populates (ParametersJsonSchema)
+// rather than the always-nil-for-this-app's-tools genai.Schema field —
+// see parametersSchema's doc comment for the full story.
+func TestParametersSchemaUsesFunctionToolSchema(t *testing.T) {
+	rf, err := functiontool.New(functiontool.Config{
+		Name:        "read_file",
+		Description: "Reads a file.",
+	}, func(_ agent.Context, args readFileArgs) (map[string]any, error) {
+		return map[string]any{"content": ""}, nil
+	})
+	if err != nil {
+		t.Fatalf("functiontool.New: %v", err)
+	}
+
+	decl, ok := rf.(interface {
+		Declaration() *genai.FunctionDeclaration
+	})
+	if !ok {
+		t.Fatalf("%T has no Declaration() method", rf)
+	}
+
+	chatTools := toolsToChatTools([]*genai.Tool{{FunctionDeclarations: []*genai.FunctionDeclaration{decl.Declaration()}}})
+	if len(chatTools) != 1 {
+		t.Fatalf("got %d tools, want 1", len(chatTools))
+	}
+
+	data, err := json.Marshal(chatTools[0].Function.Parameters)
+	if err != nil {
+		t.Fatalf("marshal parameters: %v", err)
+	}
+	var params map[string]any
+	if err := json.Unmarshal(data, &params); err != nil {
+		t.Fatalf("unmarshal parameters: %v", err)
+	}
+
+	if params["type"] != "object" {
+		t.Errorf("type = %v, want object", params["type"])
+	}
+	props, _ := params["properties"].(map[string]any)
+	if _, ok := props["path"]; !ok {
+		t.Errorf("properties missing \"path\": %#v", params)
+	}
+	required, _ := params["required"].([]any)
+	if len(required) != 1 || required[0] != "path" {
+		t.Errorf("required = %#v, want [\"path\"]", params["required"])
 	}
 }
 
