@@ -186,7 +186,7 @@ func TestRequestTranslatesToolRoundTrip(t *testing.T) {
 	}
 }
 
-// readFileArgs mirrors internal/adk/tools.go's real readFileArgs shape
+// readFileArgs mirrors internal/adk/tools/read_file.go's real readFileArgs shape
 // closely enough to reproduce the bug this test guards against: ADK's
 // functiontool package populates FunctionDeclaration.ParametersJsonSchema
 // (inferred from this struct's tags via github.com/google/jsonschema-go),

@@ -9,11 +9,13 @@
 // cycle: ui itself never references adk).
 //
 // File layout: client.go is just the public API (Client, New, Send,
-// Stream, RespondToConfirmation). agents.go builds the agent tree,
-// tools.go defines what it can call, eventstream.go translates ADK's
-// event model into ui.StreamChunk, and store.go owns persistence — each
-// a distinct concern kept out of this file on purpose, since this one
-// used to hold all of them and had become hard to scan.
+// Stream, RespondToConfirmation). agents.go builds the agent tree, the
+// tools subpackage (internal/adk/tools) defines what it can call — one
+// file per tool, tools.go there is the registration point, see its own
+// package doc comment — eventstream.go translates ADK's event model
+// into ui.StreamChunk, and store.go owns persistence — each a distinct
+// concern kept out of this file on purpose, since this one used to hold
+// all of them and had become hard to scan.
 package adk
 
 import (

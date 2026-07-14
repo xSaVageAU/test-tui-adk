@@ -1,4 +1,4 @@
-package adk
+package tools
 
 import (
 	"errors"
@@ -48,6 +48,13 @@ import (
 // the same session directly makes. Revisit only if that combination
 // actually causes a problem; today's specialists are user-authored and
 // rare enough that it hasn't.
+//
+// Everything here is unexported: gated/confirmGated and the resourceRef
+// helpers (fileRef/dirRef) are only ever used from within this package,
+// by each tool's own constructor (see list_files.go/read_file.go/
+// write_file.go for the pattern) — nothing outside internal/adk/tools
+// needs to know this machinery exists, only the resulting tool.Tool
+// values registry.go hands back.
 
 // resourceRef describes one resource a tool call touches. Two refs
 // conflict when their keys overlap (exact match, or containment when
@@ -239,7 +246,7 @@ type gatedTool struct {
 func gated(t tool.Tool, resources func(args map[string]any) []resourceRef) tool.Tool {
 	ft, ok := t.(funcTool)
 	if !ok {
-		panic(fmt.Sprintf("adk: gated: %q does not implement the expected function-tool interface", t.Name()))
+		panic(fmt.Sprintf("adk/tools: gated: %q does not implement the expected function-tool interface", t.Name()))
 	}
 	return &gatedTool{funcTool: ft, resources: resources}
 }
@@ -277,14 +284,11 @@ func (g *gatedTool) Run(ctx agent.Context, args any) (map[string]any, error) {
 // built from req.Tools around its handleFunctionCalls call sites). Left
 // unoverridden, every wrapper in this file would be silently bypassed
 // for real dispatch — Declaration/Name would still work as promoted,
-// but Run would never be reached at all, which is exactly what
-// happened: this app's whole resource-conflict gate, and later
-// confirmGatedTool, were built and unit-tested in isolation but never
-// actually exercised by a live tool call until this was caught by a
-// direct end-to-end check (see [[tool-call-concurrency]] in memory).
-// The fix: call the wrapped tool's ProcessRequest first (it still does
-// the real work of populating req.Config/the schema), then overwrite
-// req.Tools[name] to point at this wrapper instead.
+// but Run would never be reached at all — see [[tool-call-concurrency]]
+// in memory for the full story of how this was caught. The fix: call
+// the wrapped tool's ProcessRequest first (it still does the real work
+// of populating req.Config/the schema), then overwrite req.Tools[name]
+// to point at this wrapper instead.
 func (g *gatedTool) ProcessRequest(ctx agent.Context, req *model.LLMRequest) error {
 	if err := g.funcTool.ProcessRequest(ctx, req); err != nil {
 		return err
@@ -315,11 +319,11 @@ type confirmGatedTool struct {
 	// tool — e.g. true for write_file, false for a read-only tool.
 	normallyRequires bool
 	// rootName is the app's actual root agent's configured name (see
-	// rootagent.go) — a call whose ctx.AgentName() doesn't match it is
-	// happening inside a sub-agent's own disposable run, which can never
-	// resolve a confirmation at all (see this file's package doc and
-	// [[adk-multi-agent-composition]] in memory), so it always
-	// auto-accepts regardless of the active permission mode.
+	// internal/adk/rootagent.go) — a call whose ctx.AgentName() doesn't
+	// match it is happening inside a sub-agent's own disposable run,
+	// which can never resolve a confirmation at all (see this file's
+	// package doc and [[adk-multi-agent-composition]] in memory), so it
+	// always auto-accepts regardless of the active permission mode.
 	// AgentName(), not Agent().Name() — agent.Context's Agent() is
 	// deliberately stubbed to nil for a tool context (confirmed in
 	// agent/tool_context_wrapper.go: "Agent() is not supported for tool
@@ -339,7 +343,7 @@ type confirmGatedTool struct {
 func confirmGated(t tool.Tool, normallyRequires bool, rootName string) tool.Tool {
 	ft, ok := t.(funcTool)
 	if !ok {
-		panic(fmt.Sprintf("adk: confirmGated: %q does not implement the expected function-tool interface", t.Name()))
+		panic(fmt.Sprintf("adk/tools: confirmGated: %q does not implement the expected function-tool interface", t.Name()))
 	}
 	return &confirmGatedTool{funcTool: ft, normallyRequires: normallyRequires, rootName: rootName}
 }

@@ -9,6 +9,8 @@ import (
 	"google.golang.org/adk/v2/agent/llmagent"
 	"google.golang.org/adk/v2/tool"
 	"google.golang.org/adk/v2/tool/agenttool"
+
+	"tui-testing/internal/adk/tools"
 )
 
 // builtRoot is buildRootAgent's result — bundled into one struct rather
@@ -42,22 +44,9 @@ func buildRootAgent(ctx context.Context, callerProvider, callerAPIKey string) (b
 		return builtRoot{}, fmt.Errorf("load root agent config: %w", err)
 	}
 
-	listFilesTool, err := newListFilesTool(rootCfg.Name)
+	toolRegistry, err := tools.Registry(rootCfg.Name)
 	if err != nil {
-		return builtRoot{}, fmt.Errorf("create list_files tool: %w", err)
-	}
-	readFileTool, err := newReadFileTool(rootCfg.Name)
-	if err != nil {
-		return builtRoot{}, fmt.Errorf("create read_file tool: %w", err)
-	}
-	writeFileTool, err := newWriteFileTool(rootCfg.Name)
-	if err != nil {
-		return builtRoot{}, fmt.Errorf("create write_file tool: %w", err)
-	}
-	toolRegistry := map[string]tool.Tool{
-		"list_files": listFilesTool,
-		"read_file":  readFileTool,
-		"write_file": writeFileTool,
+		return builtRoot{}, fmt.Errorf("build tool registry: %w", err)
 	}
 
 	rootTools := make([]tool.Tool, 0, len(rootCfg.Tools))
