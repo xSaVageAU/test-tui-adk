@@ -69,6 +69,7 @@ func main() {
 	var note string
 	var specialists []string
 	var modelName string
+	var contextWindow int
 
 	// Read independently of whether a connection ever succeeds — the
 	// header/boot banner should show the configured name even before
@@ -95,6 +96,7 @@ func main() {
 		backend = client
 		specialists = client.Specialists()
 		modelName = client.ModelName()
+		contextWindow = client.ContextWindow()
 	case apiKey != "":
 		// A key was present but didn't work — worth surfacing, unlike the
 		// no-key case below, which the /key popup now explains itself the
@@ -109,6 +111,7 @@ func main() {
 		ModelName:        modelName,
 		AgentName:        agentName,
 		Specialists:      specialists,
+		ContextWindow:    contextWindow,
 		ListAgents:       listAgents,
 		SetAgentProvider: adk.SetAgentProvider,
 		SetAgentModel:    adk.SetAgentModel,

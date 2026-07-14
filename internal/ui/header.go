@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	"tui-testing/internal/theme"
@@ -11,9 +12,10 @@ import (
 // renderTopBar draws the fixed two-line panel pinned to the top of the
 // screen: a plain meta line (session id, active agent — in that
 // left-to-right order, plus an "auto-accept" badge when that permission
-// mode is active) followed by a solid horizontal rule separating it from
-// the chat below. No filled background panel and no platform branding —
-// just enough to orient you.
+// mode is active) on the left, a context-window usage bar (see
+// renderContextBar) on the right, followed by a solid horizontal rule
+// separating it from the chat below. No filled background panel and no
+// platform branding — just enough to orient you.
 //
 // There used to be an "idle"/"thinking…" status word here too — removed
 // at the user's request (didn't like it, wants something else in its
@@ -23,7 +25,7 @@ import (
 // "reasoning" badge was tried here first, but it belonged next to the
 // transcript's per-message "agent" label instead — see chat.go's
 // renderMessage — not here.)
-func renderTopBar(s theme.Styles, width int, agent, sessionID string, autoAccept bool) string {
+func renderTopBar(s theme.Styles, width int, agent, sessionID string, autoAccept bool, contextUsed, contextWindow int) string {
 	parts := []string{
 		s.HeaderSession.Render(shortSessionID(sessionID)),
 		s.HeaderTitle.Render(" · "),
@@ -37,9 +39,81 @@ func renderTopBar(s theme.Styles, width int, agent, sessionID string, autoAccept
 	}
 	meta := lipgloss.JoinHorizontal(lipgloss.Left, parts...)
 
-	line := s.Header.Width(width - 2).Render(meta)
+	// s.Header.Width(width-2) below applies its own Padding(0,1) inside
+	// that width, so the content area actually available for meta+bar is
+	// 4 narrower than width, not 2.
+	contentWidth := max(width-4, 0)
+	content := joinLeftRight(meta, renderContextBar(s, contextUsed, contextWindow), contentWidth)
+
+	line := s.Header.Width(width - 2).Render(content)
 	rule := s.HeaderRule.Render(strings.Repeat("─", width))
 	return line + "\n" + rule
+}
+
+// joinLeftRight places right at the far end of a width-wide line, left
+// at the near end, with the gap between filled with spaces — or, if
+// left alone already fills width (a narrow terminal), just left with
+// right silently dropped rather than truncated into something
+// unreadable. right == "" also just returns left unchanged.
+func joinLeftRight(left, right string, width int) string {
+	if right == "" {
+		return left
+	}
+	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 1 {
+		return left
+	}
+	return left + strings.Repeat(" ", gap) + right
+}
+
+// contextBarWidth is the fixed number of filled/empty block characters
+// in the context-usage bar — compact enough to sit comfortably in the
+// top bar alongside the session/agent meta.
+const contextBarWidth = 10
+
+// renderContextBar draws "<used>/<window> <bar>" for the top bar's right
+// side — the model's context window and how much of it the current
+// conversation has used so far (App.contextUsed: the most recent model
+// call's prompt token count, which — since a prompt is always the whole
+// conversation sent up to that point — already is the running total,
+// not something to sum across calls; see App.accumulateUsage). Replaces
+// the per-message "x in · x out · x tokens" line this app used to show
+// under every agent reply — a single always-visible indicator of how
+// close the conversation is to running out of room, instead of a number
+// that only ever described one turn's cost.
+//
+// "" (render nothing) if window is 0 — resolveContextWindow couldn't
+// determine it for this model (see internal/adk/contextwindow.go), and
+// a bar with no known ceiling isn't useful half-drawn.
+func renderContextBar(s theme.Styles, used, window int) string {
+	if window <= 0 {
+		return ""
+	}
+	frac := float64(used) / float64(window)
+	if frac > 1 {
+		frac = 1
+	}
+	filled := int(frac * contextBarWidth)
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", contextBarWidth-filled)
+
+	label := fmt.Sprintf("%s/%s", humanCount(used), humanCount(window))
+	return s.HeaderTitle.Render(label+" ") + s.HeaderContextBar(frac).Render(bar)
+}
+
+// humanCount renders a token count the way a person would read it aloud
+// — 128000 -> "128k", 1000000 -> "1.0M" — same reasoning as chat.go's
+// humanBytes, but base-1000 (a token count, not a byte size) and with no
+// unit suffix, since the bar's own "/" already makes the shared unit
+// obvious.
+func humanCount(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%dk", n/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
 }
 
 // shortSessionID truncates a full UUID down to a compact display form —

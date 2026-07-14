@@ -41,16 +41,9 @@ func buildModel(ctx context.Context, provider, modelName, apiKeyOverride string)
 		provider = ProviderGemini
 	}
 
-	apiKey := apiKeyOverride
-	if apiKey == "" {
-		var err error
-		apiKey, err = LoadAPIKey(provider)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if apiKey == "" {
-		return nil, fmt.Errorf("no API key saved for provider %q — use /key to set one", provider)
+	apiKey, err := resolveAPIKey(provider, apiKeyOverride)
+	if err != nil {
+		return nil, err
 	}
 
 	switch provider {
@@ -67,6 +60,25 @@ func buildModel(ctx context.Context, provider, modelName, apiKeyOverride string)
 	default:
 		return nil, fmt.Errorf("unsupported provider %q (only %q and %q are implemented today)", provider, ProviderGemini, ProviderOpenRouter)
 	}
+}
+
+// resolveAPIKey is buildModel's key-resolution step, pulled out so
+// resolveContextWindow (contextwindow.go) can resolve the same key for
+// the same (provider, apiKeyOverride) pair without duplicating this
+// logic or re-triggering buildModel's own model construction.
+func resolveAPIKey(provider, apiKeyOverride string) (string, error) {
+	apiKey := apiKeyOverride
+	if apiKey == "" {
+		var err error
+		apiKey, err = LoadAPIKey(provider)
+		if err != nil {
+			return "", err
+		}
+	}
+	if apiKey == "" {
+		return "", fmt.Errorf("no API key saved for provider %q — use /key to set one", provider)
+	}
+	return apiKey, nil
 }
 
 // keyOverride returns apiKey when configProvider (an agent's own

@@ -91,12 +91,9 @@ func renderMessage(s theme.Styles, m ChatMessage, width int, highlightUser, verb
 		if m.FinishReason != "" {
 			lines = append(lines, renderFinishReason(s, m.FinishReason))
 		}
-		if m.Usage != nil {
-			lines = append(lines, renderUsage(s, m.Usage))
-		}
 		return lipgloss.JoinVertical(lipgloss.Left, lines...)
 	case RoleTool:
-		return renderTool(s, m.ToolName, m.ToolArgs, m.ToolResult, m.ToolStatus, m.ToolPending, verboseTools, m.Usage, width)
+		return renderTool(s, m.ToolName, m.ToolArgs, m.ToolResult, m.ToolStatus, m.ToolPending, verboseTools, width)
 	default:
 		return s.MessageEvent.Render(m.Content)
 	}
@@ -136,20 +133,10 @@ const toolGutter = "▏ "
 // was that plain colored text blended in too easily to notice a
 // conversation was blocked waiting on a decision, and that's still true
 // whether or not the rest of this entry is lean.
-//
-// usage, when known, is the cost of the model call that decided to make
-// this call (see ui.ToolCall.Usage's doc comment for why it's sometimes
-// nil) — appended to the call line itself rather than gated behind
-// verboseTools, same reasoning as list_files always showing its path:
-// there's nothing "extra" about it to hide, it's a fact about the call
-// that was made, not about how much of the result to show.
-func renderTool(s theme.Styles, name string, args, result map[string]any, status string, pending, verboseTools bool, usage *TokenUsage, width int) string {
+func renderTool(s theme.Styles, name string, args, result map[string]any, status string, pending, verboseTools bool, width int) string {
 	callLine := s.ToolGutter.Render(toolGutter) + s.ToolCallName.Render(name)
 	if argsText := formatToolArgs(name, args, verboseTools); argsText != "" {
 		callLine += s.ToolCallArgs.Render("  " + argsText)
-	}
-	if usage != nil {
-		callLine += s.MessageMeta.Render("  " + formatTokenUsage(usage))
 	}
 
 	switch {
@@ -196,20 +183,6 @@ func renderToolStatusLine(s theme.Styles, style lipgloss.Style, text string, wid
 		lines[i] = prefix + style.Render(line)
 	}
 	return strings.Join(lines, "\n")
-}
-
-// renderUsage draws the quiet per-turn token-cost line under an agent
-// reply — a running total across every model call the turn made, not
-// just its last one. See App.attachTurnUsage. Shares its plain-text
-// format with renderTool's inline usage note — a tool call's Usage
-// means the same thing (a model call's token cost), just for the one
-// call that decided to make it rather than a whole turn's running total.
-func renderUsage(s theme.Styles, u *TokenUsage) string {
-	return s.MessageMeta.Render(formatTokenUsage(u))
-}
-
-func formatTokenUsage(u *TokenUsage) string {
-	return fmt.Sprintf("%d in · %d out · %d tokens", u.Prompt, u.Output, u.Total)
 }
 
 // renderReasoningBadge draws whatever belongs next to the "agent" label

@@ -18,37 +18,40 @@ type Styles struct {
 	// HeaderAutoBadge is the same treatment for the "auto-accept" badge,
 	// shown only while that permission mode is active — Warning-colored
 	// (same weight as ToolConfirmPending) since it's flagging that a
-	// safety check is relaxed, not just informational.
-	Header          lipgloss.Style
-	HeaderRule      lipgloss.Style
-	HeaderTitle     lipgloss.Style
-	HeaderAgent     lipgloss.Style
-	HeaderSession   lipgloss.Style
-	HeaderAutoBadge lipgloss.Style
-	HeaderStatus    func(status StatusKind) lipgloss.Style
+	// safety check is relaxed, not just informational. HeaderContextBar
+	// colors the context-window usage bar on the top bar's right side
+	// (see header.go's renderContextBar) by how full it is — same
+	// three-tier severity scale as HeaderStatus (Success/Warning/Error),
+	// just keyed by a 0-1 fraction instead of a StatusKind.
+	Header           lipgloss.Style
+	HeaderRule       lipgloss.Style
+	HeaderTitle      lipgloss.Style
+	HeaderAgent      lipgloss.Style
+	HeaderSession    lipgloss.Style
+	HeaderAutoBadge  lipgloss.Style
+	HeaderStatus     func(status StatusKind) lipgloss.Style
+	HeaderContextBar func(frac float64) lipgloss.Style
 
 	// Chat viewport. MessageSystem is the plain, quiet variant (only used
 	// for the empty-state placeholder); MessageEvent is the badge shown
 	// for actual system events (agent switched, key set, errors, ...) —
-	// those want to stand out, not blend in. MessageMeta is the quiet
-	// per-turn token-usage line under an agent reply. ReasoningBadge/
-	// ReasoningNote sit next to the "agent" label (see chat.go's
-	// renderMessage) — ReasoningBadge is a filled, eye-catching treatment
-	// (same weight as ToolCallName/HeaderAutoBadge) shown only while the
-	// model is actively sending reasoning/thinking output (see
-	// App.reasoning); once it's done, ReasoningNote is what's left behind
-	// permanently ("thought for Xs") — quiet, same weight as MessageMeta's
-	// token-usage line, since a finished number doesn't need to keep
-	// grabbing attention the way an in-progress one does. ReasoningText is
-	// the actual reasoning content itself, shown as its own block between
-	// the label and the reply — italic and quiet (same family as
-	// MessageSystem) so it reads as distinctly not-the-answer at a glance.
+	// those want to stand out, not blend in. ReasoningBadge/ReasoningNote
+	// sit next to the "agent" label (see chat.go's renderMessage) —
+	// ReasoningBadge is a filled, eye-catching treatment (same weight as
+	// ToolCallName/HeaderAutoBadge) shown only while the model is
+	// actively sending reasoning/thinking output (see App.reasoning);
+	// once it's done, ReasoningNote is what's left behind permanently
+	// ("thought for Xs") — quiet (just TextFaint, no fill), since a
+	// finished number doesn't need to keep grabbing attention the way an
+	// in-progress one does. ReasoningText is the actual reasoning content
+	// itself, shown as its own block between the label and the reply —
+	// italic and quiet (same family as MessageSystem) so it reads as
+	// distinctly not-the-answer at a glance.
 	Viewport          lipgloss.Style
 	MessageUser       lipgloss.Style
 	MessageAgent      lipgloss.Style
 	MessageSystem     lipgloss.Style
 	MessageEvent      lipgloss.Style
-	MessageMeta       lipgloss.Style
 	MessageContent    lipgloss.Style
 	MessageUserBubble lipgloss.Style // highlighted backdrop variant for user messages
 	ReasoningBadge    lipgloss.Style
@@ -188,6 +191,17 @@ func New(t Theme) Styles {
 		}
 	}
 
+	s.HeaderContextBar = func(frac float64) lipgloss.Style {
+		switch {
+		case frac >= 0.9:
+			return lipgloss.NewStyle().Foreground(t.Error)
+		case frac >= 0.7:
+			return lipgloss.NewStyle().Foreground(t.Warning)
+		default:
+			return lipgloss.NewStyle().Foreground(t.Success)
+		}
+	}
+
 	s.Viewport = lipgloss.NewStyle().
 		Foreground(t.Text)
 
@@ -208,9 +222,6 @@ func New(t Theme) Styles {
 		Foreground(t.Accent).
 		Bold(true).
 		Padding(0, 1)
-
-	s.MessageMeta = lipgloss.NewStyle().
-		Foreground(t.TextFaint)
 
 	s.ReasoningBadge = lipgloss.NewStyle().
 		Background(t.Accent).

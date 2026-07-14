@@ -64,6 +64,12 @@ type Client struct {
 	// one. Exposed via ModelName for the boot banner, same reasoning as
 	// specialists.
 	modelName string
+
+	// contextWindow is the root model's max input tokens, resolved once
+	// at build time (see agents.go's buildRootAgent/resolveContextWindow)
+	// — 0 if it couldn't be determined. Exposed via ContextWindow for the
+	// top bar's context-usage indicator.
+	contextWindow int
 }
 
 // New builds the root agent (config-driven — see agents.go and
@@ -100,10 +106,11 @@ func New(ctx context.Context, provider, apiKey string) (*Client, error) {
 	}
 
 	return &Client{
-		runner:      r,
-		sessions:    sessSvc,
-		specialists: built.Specialists,
-		modelName:   built.ModelName,
+		runner:        r,
+		sessions:      sessSvc,
+		specialists:   built.Specialists,
+		modelName:     built.ModelName,
+		contextWindow: built.ContextWindow,
 	}, nil
 }
 
@@ -117,6 +124,12 @@ func (c *Client) Specialists() []string {
 // ModelName returns the root agent's resolved model name.
 func (c *Client) ModelName() string {
 	return c.modelName
+}
+
+// ContextWindow returns the root model's max input tokens, or 0 if it
+// couldn't be determined (see resolveContextWindow).
+func (c *Client) ContextWindow() int {
+	return c.contextWindow
 }
 
 // RootAgentName reads just the root agent's configured name, without

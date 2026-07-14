@@ -107,11 +107,27 @@ type App struct {
 	streamingMsgIndex int
 	toolMsgIndex      map[string]int // tool call ID -> index into messages; see upsertToolMessage
 
+	// contextWindow is the current model's max input tokens (0 if
+	// unknown), set from Backend.ContextWindow on every successful
+	// (re)connect — see the keySetMsg handler. contextUsed is the most
+	// recently known prompt token count — i.e. accumulateUsage's
+	// turnUsage.Prompt, mirrored here the moment it updates rather than
+	// only once a turn finishes, so the top bar's context-usage
+	// indicator (see header.go's renderContextBar) tracks live during a
+	// multi-call turn instead of jumping only at the end. Persists
+	// across turns (a later turn's prompt only grows on top of history,
+	// same reasoning as turnUsage.Prompt itself) until resetTranscriptState
+	// zeroes it for a genuinely new/switched session.
+	contextWindow int
+	contextUsed   int
+
 	// turnUsage/turnFinishReason accumulate across every model call one
 	// logical turn makes — including across a HITL pause/resume, which
 	// closes and reopens the stream channel but is still the same turn —
-	// until attachTurnUsage lands them on the turn's final agent message.
-	// See dispatchToBackend (where these reset) and attachTurnUsage.
+	// until attachTurnFinishReason clears them at the turn's end (see
+	// dispatchToBackend, where these reset at the turn's start).
+	// turnUsage.Prompt is also mirrored live into contextUsed above as it
+	// updates; turnFinishReason lands on the turn's final agent message.
 	turnUsage        *TokenUsage
 	turnFinishReason string
 
@@ -196,6 +212,11 @@ type AppConfig struct {
 	// startup (empty if none), shown in the boot banner. Meaningless
 	// without a Backend — leave nil when Backend is nil.
 	Specialists []string
+	// ContextWindow is the backend's model's max input tokens (0 if
+	// unknown), backing the top bar's context-usage indicator from the
+	// very first frame. Meaningless without a Backend — leave 0 when
+	// Backend is nil.
+	ContextWindow int
 	// ListAgents/SetAgentProvider/SetAgentModel back /agents — reading
 	// and editing config files directly, independent of whether a
 	// Backend connection currently exists (unlike NewBackend, these work
@@ -232,6 +253,7 @@ func NewApp(cfg AppConfig) *App {
 			Specialists: cfg.Specialists,
 		},
 		agentName:        cfg.AgentName,
+		contextWindow:    cfg.ContextWindow,
 		status:           theme.StatusIdle,
 		highlightUser:    uiSettings.HighlightUser,
 		streamReplies:    uiSettings.StreamReplies,
@@ -327,7 +349,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// reopens a fresh channel for the same turn, so the running
 			// totals need to survive until then rather than land now.
 			if a.pendingConfirmation == nil {
-				a.attachTurnUsage()
+				a.attachTurnFinishReason()
 			}
 			a.followTranscript()
 			return a, endCmd
@@ -349,7 +371,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.insertConfirmMessage(msg.chunk.Confirmation)
 		case msg.chunk.ToolCall != nil:
 			cmd = a.endReasoning()
-			a.upsertToolMessage(msg.chunk.ToolCall.ID, msg.chunk.ToolCall.Name, msg.chunk.ToolCall.Args, toolStatusRunning, false, msg.chunk.ToolCall.Usage)
+			a.upsertToolMessage(msg.chunk.ToolCall.ID, msg.chunk.ToolCall.Name, msg.chunk.ToolCall.Args, toolStatusRunning, false)
 			a.workingLabel = "using " + msg.chunk.ToolCall.Name
 		case msg.chunk.ToolResult != nil:
 			a.completeToolMessage(msg.chunk.ToolResult.ID, msg.chunk.ToolResult.Name, msg.chunk.ToolResult.Result)
@@ -383,6 +405,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.backend = msg.backend
 		a.bootInfo.Model = msg.backend.ModelName()
 		a.bootInfo.Specialists = msg.backend.Specialists()
+		a.contextWindow = msg.backend.ContextWindow()
 		if msg.successMsg != "" {
 			a.systemMessage(msg.successMsg)
 		} else {
@@ -685,6 +708,7 @@ func (a *App) accumulateUsage(u *TokenUsage) {
 	}
 	a.turnUsage.Output += u.Output
 	a.turnUsage.Total = a.turnUsage.Prompt + a.turnUsage.Output
+	a.contextUsed = a.turnUsage.Prompt
 }
 
 // reasoningTickInterval drives both the live "thinking Xms/Xs" re-render
@@ -737,26 +761,29 @@ func (a *App) endReasoning() tea.Cmd {
 	return a.stopwatch.Stop()
 }
 
-// attachTurnUsage lands the turn's accumulated usage/finish-reason on the
-// last RoleAgent message it produced, then clears the accumulator. Called
-// once the turn is genuinely over (see the streamChunkMsg !ok case) —
-// never mid-turn, since a tool call in progress would otherwise get an
-// intermediate model call's numbers attached to the wrong bubble.
+// attachTurnFinishReason lands the turn's finish reason (if any) on the
+// last RoleAgent message it produced, then clears both accumulators.
+// Called once the turn is genuinely over (see the streamChunkMsg !ok
+// case) — never mid-turn, since a tool call in progress would otherwise
+// get an intermediate model call's reason attached to the wrong bubble.
+//
+// turnUsage itself isn't attached anywhere here — it's a running
+// accumulator only, already reflected live in a.contextUsed as it
+// updates (see accumulateUsage); nothing renders it per-message.
 //
 // If the model's very last call in the turn produced no closing prose,
 // its placeholder was already dropped by dropEmptyStreamingPlaceholder by
 // the time this runs, leaving no RoleAgent message left to attach to —
-// rare, and not worth inventing a bubble just to hold a token count, so
-// it's silently skipped rather than attached somewhere misleading.
-func (a *App) attachTurnUsage() {
-	usage, reason := a.turnUsage, a.turnFinishReason
+// rare, and not worth inventing a bubble just to hold a finish reason,
+// so it's silently skipped rather than attached somewhere misleading.
+func (a *App) attachTurnFinishReason() {
+	reason := a.turnFinishReason
 	a.turnUsage, a.turnFinishReason = nil, ""
-	if usage == nil && reason == "" {
+	if reason == "" {
 		return
 	}
 	for i := len(a.messages) - 1; i >= 0; i-- {
 		if a.messages[i].Role == RoleAgent {
-			a.messages[i].Usage = usage
 			a.messages[i].FinishReason = reason
 			return
 		}
@@ -776,21 +803,14 @@ func (a *App) attachTurnUsage() {
 //
 // On every later sighting of the same ID, only status/pending are
 // touched — args aren't overwritten, since only the initial call event
-// carries them; a confirmation event reuses them via nil. usage is the
-// one exception allowed to arrive late: the backend can't always
-// attribute a tool call's cost the first time it's seen (see
-// eventstream.go's sentCallUsage), so a non-nil usage on a later
-// sighting still gets recorded even though it wasn't there originally.
-func (a *App) upsertToolMessage(id, name string, args map[string]any, status string, pending bool, usage *TokenUsage) {
+// carries them; a confirmation event reuses them via nil.
+func (a *App) upsertToolMessage(id, name string, args map[string]any, status string, pending bool) {
 	if idx, ok := a.toolMsgIndex[id]; ok && idx < len(a.messages) {
 		a.messages[idx].ToolStatus = status
 		a.messages[idx].ToolPending = pending
-		if usage != nil {
-			a.messages[idx].Usage = usage
-		}
 		return
 	}
-	a.newToolMessage(id, ChatMessage{ToolName: name, ToolArgs: args, ToolStatus: status, ToolPending: pending, Usage: usage, At: time.Now()})
+	a.newToolMessage(id, ChatMessage{ToolName: name, ToolArgs: args, ToolStatus: status, ToolPending: pending, At: time.Now()})
 }
 
 // completeToolMessage records a finished call's raw result. Kept
@@ -999,7 +1019,7 @@ func (a *App) View() string {
 		return ""
 	}
 
-	topBar := renderTopBar(a.styles, a.width, a.agentName, a.sessionID, a.permissionMode == permissionFullAuto)
+	topBar := renderTopBar(a.styles, a.width, a.agentName, a.sessionID, a.permissionMode == permissionFullAuto, a.contextUsed, a.contextWindow)
 	body := a.viewport.View()
 	if sticky := a.stickyPromptOverlay(); sticky != "" {
 		body = overlay(body, sticky, 0, 0, a.viewport.Width)

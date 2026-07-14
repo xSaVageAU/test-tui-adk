@@ -45,14 +45,10 @@ type ChatMessage struct {
 	ToolPending bool           // true only while ToolStatus is an approval request awaiting a decision
 	At          time.Time
 
-	// Usage is the token cost attributed to this entry: on a RoleAgent
-	// message, the turn's whole accumulated cost (see App.attachTurnUsage);
-	// on a RoleTool message, specifically the one model call that decided
-	// to make this call (see App.upsertToolMessage) — set once, at call
-	// time, and never changes afterward. FinishReason is RoleAgent-only:
-	// a note about why the model's last call in the turn ended on
-	// something other than a plain "stop".
-	Usage        *TokenUsage
+	// FinishReason is RoleAgent-only: a note about why the model's last
+	// call in the turn ended on something other than a plain "stop".
+	// Token usage isn't tracked per-message — see App.contextUsed and
+	// header.go's renderContextBar for where it's shown instead.
 	FinishReason string
 
 	// ReasoningActive/ReasoningDuration/ReasoningText are RoleAgent-only —

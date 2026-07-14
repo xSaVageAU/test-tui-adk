@@ -32,6 +32,7 @@ func (a *App) resetTranscriptState() {
 	a.toolMsgIndex = nil
 	a.pendingConfirmation = nil
 	a.turnUsage, a.turnFinishReason = nil, ""
+	a.contextUsed = 0
 	a.lastPromptText = ""
 	a.status = theme.StatusIdle
 }

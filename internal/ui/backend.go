@@ -46,6 +46,11 @@ type Backend interface {
 	// actually live instead of what was true when the app first opened.
 	ModelName() string
 	Specialists() []string
+
+	// ContextWindow reports the current model's max input tokens (0 if
+	// unknown) — backs the top bar's context-usage indicator, read at
+	// the same points as ModelName/Specialists.
+	ContextWindow() int
 }
 
 // SessionSummary is one entry in Backend.ListSessions' result.
@@ -95,14 +100,6 @@ type ToolCall struct {
 	ID   string
 	Name string
 	Args map[string]any
-	// Usage is the cost of the specific model call that decided to make
-	// this tool call, when the backend can attribute it (nil otherwise —
-	// a caller that can't tell shouldn't guess). If the model requested
-	// several tool calls in parallel from one generation, they all share
-	// this same Usage value — it's the cost of that one generation, not
-	// an individual per-call charge, and showing the same number on each
-	// is more honest than dividing it or picking one arbitrarily.
-	Usage *TokenUsage
 }
 
 // ToolResult is a tool's result being fed back to the agent. ID matches
@@ -126,12 +123,6 @@ type ToolConfirmationRequest struct {
 	Tool       string
 	Args       map[string]any
 	Hint       string // human-readable explanation, if the tool provided one; may be ""
-	// Usage is the cost of the model call that decided to make this
-	// call, same meaning and same nil-if-unknown caveat as ToolCall.Usage
-	// — a confirmation-gated call (e.g. write_file in normal mode) never
-	// shows up as a plain ToolCall chunk at all, only this one, so this
-	// is the only place it can ever be attributed from.
-	Usage *TokenUsage
 }
 
 // BackendFactory builds a Backend from a user-supplied API key for the

@@ -17,10 +17,11 @@ import (
 // than a long return list since New needs all four pieces to populate
 // Client.
 type builtRoot struct {
-	Agent       agent.Agent
-	Name        string
-	ModelName   string
-	Specialists []string // discovered sub-agent names, in load order
+	Agent         agent.Agent
+	Name          string
+	ModelName     string
+	ContextWindow int      // 0 if unknown; see resolveContextWindow
+	Specialists   []string // discovered sub-agent names, in load order
 }
 
 // buildRootAgent assembles the root agent plus whatever specialists are
@@ -67,6 +68,19 @@ func buildRootAgent(ctx context.Context, callerProvider, callerAPIKey string) (b
 		modelName = DefaultModelName
 	}
 
+	// Best-effort: resolveAPIKey failing here would be surprising (the
+	// same call just succeeded moments ago inside buildModel), but
+	// there's no reason to fail the whole agent build over a cosmetic UI
+	// number if it somehow does — contextWindow just stays 0.
+	rootProvider := rootCfg.Provider
+	if rootProvider == "" {
+		rootProvider = ProviderGemini
+	}
+	contextWindow := 0
+	if key, err := resolveAPIKey(rootProvider, keyOverride(rootCfg.Provider, callerProvider, callerAPIKey)); err == nil {
+		contextWindow = resolveContextWindow(ctx, rootProvider, modelName, key)
+	}
+
 	subConfigs, err := loadSubAgentConfigs()
 	if err != nil {
 		return builtRoot{}, fmt.Errorf("load sub-agent configs: %w", err)
@@ -93,7 +107,7 @@ func buildRootAgent(ctx context.Context, callerProvider, callerAPIKey string) (b
 		return builtRoot{}, fmt.Errorf("create agent: %w", err)
 	}
 
-	return builtRoot{Agent: root, Name: rootCfg.Name, ModelName: modelName, Specialists: names}, nil
+	return builtRoot{Agent: root, Name: rootCfg.Name, ModelName: modelName, ContextWindow: contextWindow, Specialists: names}, nil
 }
 
 // rootInstructionFor appends a generated "Available specialists" list
