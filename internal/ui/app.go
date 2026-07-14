@@ -12,7 +12,6 @@ import (
 	"tui-testing/internal/settings"
 	"tui-testing/internal/theme"
 
-	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/stopwatch"
@@ -135,7 +134,6 @@ type App struct {
 	userMsgLines []int // line offset of each user message's block; see renderTranscript
 	input        textarea.Model
 	inputLines   int // current wrapped height of the input box, [minInputLines, maxInputLines]
-	help         help.Model
 
 	paletteKind      paletteKind
 	paletteTitle     string
@@ -264,14 +262,12 @@ func NewApp(cfg AppConfig) *App {
 		inputLines:       minInputLines,
 		messages:         messages,
 		input:            newInput(styles),
-		help:             help.New(),
 		listAgents:       cfg.ListAgents,
 		setAgentProvider: cfg.SetAgentProvider,
 		setAgentModel:    cfg.SetAgentModel,
 		workingAnim:      newWorkingAnimState(parseWorkingAnimVariant(uiSettings.WorkingAnim)),
 		workingLabel:     "thinking",
 	}
-	a.help.ShortSeparator = "  "
 	return a
 }
 
@@ -1029,7 +1025,7 @@ func (a *App) View() string {
 		workingAnimBlock = a.workingAnim.render(a.styles.Theme, a.width, a.workingLabel)
 	}
 	inputBar := renderInputBar(a.styles, a.input, a.width, a.inputLines, true)
-	footer := a.styles.Help.Render(a.help.View(keys))
+	footer := renderHelpFooter(a.styles, a.permissionMode == permissionFullAuto, a.verboseTools)
 
 	parts := []string{topBar, body}
 	if len(a.suggestMatches) > 0 {

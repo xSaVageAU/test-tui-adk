@@ -12,7 +12,7 @@ type keyMap struct {
 
 	// Escape isn't a discoverable hotkey — it's just how an open popup
 	// menu or the inline "/command" suggestion dropdown gets dismissed —
-	// so it's left out of ShortHelp.
+	// so it's left out of the footer.
 	Escape key.Binding
 
 	// Up/Down are only live while a popup menu or the "/command"
@@ -91,14 +91,4 @@ var keys = keyMap{
 		key.WithKeys("f2"),
 		key.WithHelp("f2", "verbose tools"),
 	),
-}
-
-// ShortHelp and FullHelp satisfy bubbles/help.KeyMap so the footer help
-// line can be generated from the same bindings Update() switches on.
-func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{keys.Send, keys.Commands, keys.ScrollUp, keys.AutoAccept, keys.VerboseTools, keys.Quit}
-}
-
-func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{k.ShortHelp()}
 }

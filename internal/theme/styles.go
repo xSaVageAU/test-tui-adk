@@ -130,8 +130,30 @@ type Styles struct {
 	SuggestionDesc         lipgloss.Style
 	SuggestionSelectedDesc lipgloss.Style
 
-	// Misc
-	Help lipgloss.Style
+	// HelpBadge styles one "key desc" pill in the bottom help footer (see
+	// footer.go's renderHelpFooter) — one shared background per badge
+	// (dim by default, a quiet grouping cue rather than something meant
+	// to compete with the chat above it; the same Warning-filled
+	// treatment as HeaderAutoBadge/ToolConfirmPending while a toggle
+	// bind's own setting — AutoAccept, VerboseTools — is currently on, so
+	// the footer doubles as a quiet indicator of which toggles are
+	// active). Key renders a shade darker than Desc within that shared
+	// fill — see HelpBadgeStyle's own doc comment — which is the only
+	// thing distinguishing the two; a from-scratch two-tone (separate
+	// background per half) was tried and looked worse, not better, per
+	// direct feedback.
+	HelpBadge func(active bool) HelpBadgeStyle
+}
+
+// HelpBadgeStyle is one help-footer badge's pair of styles, sharing one
+// Background: Key (the literal key combo, e.g. "shift+tab") a shade
+// darker, Desc (what it does, e.g. "auto-accept") the badge's normal
+// foreground — a light touch on purpose, just enough that the two read
+// as distinct parts of the badge rather than one undifferentiated run
+// of text.
+type HelpBadgeStyle struct {
+	Key  lipgloss.Style
+	Desc lipgloss.Style
 }
 
 // StatusKind is the small set of states the header status pill can show.
@@ -379,8 +401,18 @@ func New(t Theme) Styles {
 		Foreground(t.TextOnFill).
 		Background(t.Accent)
 
-	s.Help = lipgloss.NewStyle().
-		Foreground(t.TextFaint)
+	s.HelpBadge = func(active bool) HelpBadgeStyle {
+		bg, keyFg, descFg := t.Surface, t.TextFaint, t.TextMuted
+		if active {
+			bg, keyFg, descFg = t.Warning, t.TextOnFill, t.TextOnFill
+		}
+		keyStyle := lipgloss.NewStyle().Background(bg).Foreground(keyFg).Padding(0, 0, 0, 1)
+		descStyle := lipgloss.NewStyle().Background(bg).Foreground(descFg).Padding(0, 1, 0, 0)
+		if active {
+			descStyle = descStyle.Bold(true)
+		}
+		return HelpBadgeStyle{Key: keyStyle, Desc: descStyle}
+	}
 
 	return s
 }
