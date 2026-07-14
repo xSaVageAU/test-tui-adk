@@ -8,6 +8,8 @@ import (
 
 	"google.golang.org/adk/v2/model"
 	"google.golang.org/adk/v2/model/gemini"
+
+	"tui-testing/internal/adk/openrouter"
 )
 
 // DefaultModelName is used whenever neither an agent's own agent.json
@@ -25,22 +27,17 @@ const DefaultModelName = "gemini-3.1-flash-lite"
 // provider besides "whatever main.go started with" gets its key,
 // including a sub-agent configured for a different provider than root.
 //
-// Only Gemini is actually implemented today. ProviderOpenRouter is
-// recognized (so agent.json/credentials.json can already name it) but
-// deliberately stubbed — it needs its own model.LLM implementation
-// (OpenRouter speaks an OpenAI-compatible chat-completions API; ADK
-// only ships Gemini and Apigee model packages, so this would be a
-// from-scratch adapter, not a config flip) — that's future work, this
-// is just the seam it'll plug into. Any other provider value is a
-// clear, immediate error rather than a silent fallback, since picking
-// the wrong model without saying so would be far more confusing than
-// refusing to start.
+// Gemini and OpenRouter are both implemented. Any other provider value
+// is a clear, immediate error rather than a silent fallback, since
+// picking the wrong model without saying so would be far more confusing
+// than refusing to start. DefaultModelName only applies to Gemini —
+// there's no sensible cross-provider default model slug, so an
+// OpenRouter config with no "model" set is its own explicit error
+// rather than silently trying to run a Gemini model name against
+// OpenRouter.
 func buildModel(ctx context.Context, provider, modelName, apiKeyOverride string) (model.LLM, error) {
 	if provider == "" {
 		provider = ProviderGemini
-	}
-	if modelName == "" {
-		modelName = DefaultModelName
 	}
 
 	apiKey := apiKeyOverride
@@ -57,11 +54,17 @@ func buildModel(ctx context.Context, provider, modelName, apiKeyOverride string)
 
 	switch provider {
 	case ProviderGemini:
+		if modelName == "" {
+			modelName = DefaultModelName
+		}
 		return gemini.NewModel(ctx, modelName, &genai.ClientConfig{APIKey: apiKey})
 	case ProviderOpenRouter:
-		return nil, fmt.Errorf("provider %q is not implemented yet — OpenRouter support is planned but not built", provider)
+		if modelName == "" {
+			return nil, fmt.Errorf("provider %q requires an explicit \"model\" in agent.json (e.g. \"openai/gpt-4o-mini\")", provider)
+		}
+		return openrouter.NewModel(modelName, apiKey), nil
 	default:
-		return nil, fmt.Errorf("unsupported provider %q (only %q is implemented today)", provider, ProviderGemini)
+		return nil, fmt.Errorf("unsupported provider %q (only %q and %q are implemented today)", provider, ProviderGemini, ProviderOpenRouter)
 	}
 }
 
