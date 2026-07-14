@@ -300,6 +300,29 @@ func functionResponseContent(fr *genai.FunctionResponse) string {
 	return string(b)
 }
 
+// reasoningText combines a message/delta's two possible reasoning-output
+// shapes (see chatMessage's doc comment) into one plaintext string:
+// Reasoning as-is, plus whatever human-readable text ReasoningDetails
+// carries (reasoning.text/reasoning.summary entries; reasoning.encrypted
+// entries have nothing displayable and are skipped). Most models only
+// ever populate one of the two, but nothing stops reading both.
+func reasoningText(m *chatMessage) string {
+	if m == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(m.Reasoning)
+	for _, d := range m.ReasoningDetails {
+		switch d.Type {
+		case "reasoning.text":
+			b.WriteString(d.Text)
+		case "reasoning.summary":
+			b.WriteString(d.Summary)
+		}
+	}
+	return b.String()
+}
+
 // toolsToChatTools flattens every FunctionDeclaration across all tools
 // into OpenAI's flat tools list — genai groups declarations under a
 // Tool wrapper that also carries unrelated built-in tool types
@@ -413,6 +436,9 @@ func toolConfigToChoice(tc *genai.ToolConfig) any {
 func choiceToLLMResponse(choice chatChoice, usage *chatUsage) *model.LLMResponse {
 	var parts []*genai.Part
 	if choice.Message != nil {
+		if reasoning := reasoningText(choice.Message); reasoning != "" {
+			parts = append(parts, &genai.Part{Text: reasoning, Thought: true})
+		}
 		if choice.Message.Content != "" {
 			parts = append(parts, &genai.Part{Text: choice.Message.Content})
 		}

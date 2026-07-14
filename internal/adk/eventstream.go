@@ -101,6 +101,19 @@ func (c *Client) runStream(ctx context.Context, sessionID string, msg *genai.Con
 
 			for _, part := range event.Content.Parts {
 				switch {
+				// Checked before the plain-Text case below, not merged
+				// into it: a thought part also has Text != "", so
+				// whichever case comes first wins — Gemini sets Thought
+				// on parts that represent reasoning rather than the
+				// actual reply (our own OpenRouter model.LLM does the
+				// same for a provider's reasoning/reasoning_content
+				// field — see internal/adk/openrouter's aggregator), and
+				// those should never be treated as reply text.
+				case event.Partial && part.Thought && part.Text != "":
+					if !send(ui.StreamChunk{Reasoning: part.Text}) {
+						return
+					}
+
 				case event.Partial && part.Text != "":
 					if !send(ui.StreamChunk{Text: part.Text}) {
 						return

@@ -321,3 +321,152 @@ func TestStreamingTextAndToolCall(t *testing.T) {
 		t.Errorf("unexpected usage: %+v", final.UsageMetadata)
 	}
 }
+
+// TestReasoningTextCombinesBothShapes covers reasoningText's whole job:
+// OpenRouter has two reasoning-output shapes (see chatMessage's doc
+// comment, confirmed against https://openrouter.ai/docs/use-cases/
+// reasoning-tokens) — a plain string and a structured array — and not
+// every reasoning-capable model populates the same one.
+func TestReasoningTextCombinesBothShapes(t *testing.T) {
+	cases := []struct {
+		name string
+		msg  *chatMessage
+		want string
+	}{
+		{"nil message", nil, ""},
+		{"plain field only", &chatMessage{Reasoning: "thinking about it"}, "thinking about it"},
+		{
+			"details only, text type",
+			&chatMessage{ReasoningDetails: []chatReasoningDetail{{Type: "reasoning.text", Text: "step one"}}},
+			"step one",
+		},
+		{
+			"details only, summary type",
+			&chatMessage{ReasoningDetails: []chatReasoningDetail{{Type: "reasoning.summary", Summary: "in short"}}},
+			"in short",
+		},
+		{
+			"encrypted entries contribute nothing",
+			&chatMessage{ReasoningDetails: []chatReasoningDetail{
+				{Type: "reasoning.encrypted"},
+				{Type: "reasoning.text", Text: "visible part"},
+			}},
+			"visible part",
+		},
+		{
+			"both shapes present, plain field wins ordering",
+			&chatMessage{
+				Reasoning:        "plain first",
+				ReasoningDetails: []chatReasoningDetail{{Type: "reasoning.text", Text: " then details"}},
+			},
+			"plain first then details",
+		},
+	}
+	for _, c := range cases {
+		if got := reasoningText(c.msg); got != c.want {
+			t.Errorf("%s: reasoningText() = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// TestNonStreamingReasoning verifies a non-streaming response with
+// reasoning output becomes a Thought:true part ordered before the real
+// reply text — eventstream.go relies on that Thought flag to route
+// reasoning to StreamChunk.Reasoning instead of showing it as the
+// agent's actual reply (see its doc comment on the ordering of its own
+// switch cases).
+func TestNonStreamingReasoning(t *testing.T) {
+	withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(chatResponse{
+			Choices: []chatChoice{{
+				Message:      &chatMessage{Content: "42", Reasoning: "let me compute this"},
+				FinishReason: "stop",
+			}},
+		})
+	})
+
+	m := NewModel("openai/o1", "test-key")
+	req := &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("what is 6*7", genai.RoleUser)}}
+
+	responses := collect(t, m.GenerateContent(context.Background(), req, false))
+	if len(responses) != 1 {
+		t.Fatalf("got %d responses, want 1", len(responses))
+	}
+	parts := responses[0].Content.Parts
+	if len(parts) != 2 {
+		t.Fatalf("got %d parts, want 2 (reasoning + text): %+v", len(parts), parts)
+	}
+	if !parts[0].Thought || parts[0].Text != "let me compute this" {
+		t.Errorf("parts[0] = %+v, want Thought:true Text:%q", parts[0], "let me compute this")
+	}
+	if parts[1].Thought || parts[1].Text != "42" {
+		t.Errorf("parts[1] = %+v, want Thought:false Text:%q", parts[1], "42")
+	}
+}
+
+// TestStreamingReasoning verifies streaming reasoning deltas arrive as
+// their own Partial Thought:true responses (distinct from text deltas)
+// and that the final aggregated response has the full reasoning text as
+// a Thought part ordered before the real reply text.
+func TestStreamingReasoning(t *testing.T) {
+	withServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+		wr := bufio.NewWriter(w)
+
+		write := func(chunk chatStreamChunk) {
+			data, _ := json.Marshal(chunk)
+			wr.WriteString("data: ")
+			wr.Write(data)
+			wr.WriteString("\n\n")
+			wr.Flush()
+			flusher.Flush()
+		}
+
+		write(chatStreamChunk{Choices: []chatStreamChoice{{Delta: &chatMessage{Reasoning: "let me "}}}})
+		write(chatStreamChunk{Choices: []chatStreamChoice{{Delta: &chatMessage{Reasoning: "think"}}}})
+		write(chatStreamChunk{Choices: []chatStreamChoice{{Delta: &chatMessage{Content: "42"}}}})
+		write(chatStreamChunk{Choices: []chatStreamChoice{{FinishReason: "stop"}}})
+		wr.WriteString("data: [DONE]\n\n")
+		wr.Flush()
+		flusher.Flush()
+	})
+
+	m := NewModel("openai/o1", "test-key")
+	req := &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("what is 6*7", genai.RoleUser)}}
+
+	responses := collect(t, m.GenerateContent(context.Background(), req, true))
+	if len(responses) != 4 { // 2 reasoning deltas + 1 text delta, all partial, + 1 final aggregate
+		t.Fatalf("got %d responses, want 4: %+v", len(responses), responses)
+	}
+
+	for i, r := range responses[:3] {
+		if !r.Partial {
+			t.Errorf("responses[%d] not partial: %+v", i, r)
+		}
+	}
+	if !responses[0].Content.Parts[0].Thought || responses[0].Content.Parts[0].Text != "let me " {
+		t.Errorf("responses[0] = %+v, want a Thought delta %q", responses[0], "let me ")
+	}
+	if !responses[1].Content.Parts[0].Thought || responses[1].Content.Parts[0].Text != "think" {
+		t.Errorf("responses[1] = %+v, want a Thought delta %q", responses[1], "think")
+	}
+	if responses[2].Content.Parts[0].Thought || responses[2].Content.Parts[0].Text != "42" {
+		t.Errorf("responses[2] = %+v, want a non-Thought delta %q", responses[2], "42")
+	}
+
+	final := responses[3]
+	if final.Partial {
+		t.Error("final response has Partial = true, want false")
+	}
+	parts := final.Content.Parts
+	if len(parts) != 2 {
+		t.Fatalf("got %d final parts, want 2 (reasoning + text): %+v", len(parts), parts)
+	}
+	if !parts[0].Thought || parts[0].Text != "let me think" {
+		t.Errorf("final parts[0] = %+v, want Thought:true Text:%q", parts[0], "let me think")
+	}
+	if parts[1].Thought || parts[1].Text != "42" {
+		t.Errorf("final parts[1] = %+v, want Thought:false Text:%q", parts[1], "42")
+	}
+}

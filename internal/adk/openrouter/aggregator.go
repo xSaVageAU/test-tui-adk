@@ -23,6 +23,7 @@ import (
 // driver exactly rather than guessing at a field it doesn't set.
 type aggregator struct {
 	text      strings.Builder
+	reasoning strings.Builder
 	toolCalls map[int]*toolCallBuilder
 	toolOrder []int
 
@@ -40,8 +41,10 @@ func newAggregator() *aggregator {
 }
 
 // processChunk folds one SSE chunk into the running aggregate and
-// returns zero or one Partial model.LLMResponse to forward immediately
-// — only a text delta produces one; tool-call argument fragments are
+// returns zero or more Partial model.LLMResponse to forward immediately
+// — a text delta and a reasoning delta each produce one (reasoning
+// tagged Thought: true, see genai.Part's own doc comment and
+// eventstream.go's handling of it); tool-call argument fragments are
 // silent until the whole call is assembled in close(), since a partial
 // JSON-arguments fragment isn't meaningful to show incrementally.
 func (a *aggregator) processChunk(chunk chatStreamChunk) []*model.LLMResponse {
@@ -60,6 +63,13 @@ func (a *aggregator) processChunk(chunk chatStreamChunk) []*model.LLMResponse {
 	}
 
 	var out []*model.LLMResponse
+	if delta := reasoningText(choice.Delta); delta != "" {
+		a.reasoning.WriteString(delta)
+		out = append(out, &model.LLMResponse{
+			Content: &genai.Content{Parts: []*genai.Part{{Text: delta, Thought: true}}, Role: genai.RoleModel},
+			Partial: true,
+		})
+	}
 	if choice.Delta.Content != "" {
 		a.text.WriteString(choice.Delta.Content)
 		out = append(out, &model.LLMResponse{
@@ -89,11 +99,14 @@ func (a *aggregator) processChunk(chunk chatStreamChunk) []*model.LLMResponse {
 // never produced any content at all (an immediate error case upstream
 // already reported separately).
 func (a *aggregator) close() *model.LLMResponse {
-	if a.text.Len() == 0 && len(a.toolCalls) == 0 && a.finishReason == "" {
+	if a.text.Len() == 0 && a.reasoning.Len() == 0 && len(a.toolCalls) == 0 && a.finishReason == "" {
 		return nil
 	}
 
 	var parts []*genai.Part
+	if a.reasoning.Len() > 0 {
+		parts = append(parts, &genai.Part{Text: a.reasoning.String(), Thought: true})
+	}
 	if a.text.Len() > 0 {
 		parts = append(parts, &genai.Part{Text: a.text.String()})
 	}

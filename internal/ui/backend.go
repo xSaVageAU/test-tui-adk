@@ -69,7 +69,15 @@ type StreamChunk struct {
 	Confirmation *ToolConfirmationRequest
 	Usage        *TokenUsage
 	FinishReason string // non-empty only for a notable non-"stop" reason
-	Err          error
+	// Reasoning is a delta of the model's reasoning/thinking output, kept
+	// distinct from Text specifically so the UI never has to guess
+	// whether a given Text delta is "real" reply content or the model's
+	// internal reasoning — a provider that supports it (Gemini's Thought
+	// parts, an OpenRouter reasoning model's reasoning/reasoning_content
+	// field) tags it at the source; see internal/adk/eventstream.go and
+	// internal/adk/openrouter's aggregator for where each is set.
+	Reasoning string
+	Err       error
 }
 
 // TokenUsage reports the token cost of one underlying model call.

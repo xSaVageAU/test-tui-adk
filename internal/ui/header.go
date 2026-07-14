@@ -19,7 +19,10 @@ import (
 // at the user's request (didn't like it, wants something else in its
 // place eventually). App.status/theme.StatusKind/Styles.HeaderStatus are
 // deliberately still tracked and left alone, not ripped out — they're
-// exactly the hook whatever replaces this will want to read.
+// exactly the hook whatever replaces this will want to read. (A
+// "reasoning" badge was tried here first, but it belonged next to the
+// transcript's per-message "agent" label instead — see chat.go's
+// renderMessage — not here.)
 func renderTopBar(s theme.Styles, width int, agent, sessionID string, autoAccept bool) string {
 	parts := []string{
 		s.HeaderSession.Render(shortSessionID(sessionID)),

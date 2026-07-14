@@ -51,6 +51,16 @@ type ChatMessage struct {
 	// App.attachTurnUsage.
 	Usage        *TokenUsage
 	FinishReason string
+
+	// ReasoningActive/ReasoningDuration are also RoleAgent-only — whether
+	// this message's reasoning phase (see App.reasoning) is in progress
+	// right now, and how long it took once it isn't. ReasoningDuration is
+	// live-updated once a second while ReasoningActive (App.stopwatch)
+	// and then frozen — it's deliberately never cleared back to zero once
+	// set, so "thought for Xs" stays visible under the reply as a
+	// permanent record instead of disappearing the moment reasoning ends.
+	ReasoningActive   bool
+	ReasoningDuration time.Duration
 }
 
 // newSessionID generates a fresh conversation identifier for App to use

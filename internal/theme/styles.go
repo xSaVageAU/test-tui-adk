@@ -31,7 +31,15 @@ type Styles struct {
 	// for the empty-state placeholder); MessageEvent is the badge shown
 	// for actual system events (agent switched, key set, errors, ...) —
 	// those want to stand out, not blend in. MessageMeta is the quiet
-	// per-turn token-usage line under an agent reply.
+	// per-turn token-usage line under an agent reply. ReasoningBadge/
+	// ReasoningNote sit next to the "agent" label (see chat.go's
+	// renderMessage) — ReasoningBadge is a filled, eye-catching treatment
+	// (same weight as ToolCallName/HeaderAutoBadge) shown only while the
+	// model is actively sending reasoning/thinking output (see
+	// App.reasoning); once it's done, ReasoningNote is what's left behind
+	// permanently ("thought for Xs") — quiet, same weight as MessageMeta's
+	// token-usage line, since a finished number doesn't need to keep
+	// grabbing attention the way an in-progress one does.
 	Viewport          lipgloss.Style
 	MessageUser       lipgloss.Style
 	MessageAgent      lipgloss.Style
@@ -40,6 +48,8 @@ type Styles struct {
 	MessageMeta       lipgloss.Style
 	MessageContent    lipgloss.Style
 	MessageUserBubble lipgloss.Style // highlighted backdrop variant for user messages
+	ReasoningBadge    lipgloss.Style
+	ReasoningNote     lipgloss.Style
 
 	// MessageFinish* style the note shown under an agent reply that ended
 	// on a notable non-"stop" finish reason — Warning for a benign
@@ -196,6 +206,15 @@ func New(t Theme) Styles {
 		Padding(0, 1)
 
 	s.MessageMeta = lipgloss.NewStyle().
+		Foreground(t.TextFaint)
+
+	s.ReasoningBadge = lipgloss.NewStyle().
+		Background(t.Accent).
+		Foreground(t.TextOnFill).
+		Bold(true).
+		Padding(0, 1)
+
+	s.ReasoningNote = lipgloss.NewStyle().
 		Foreground(t.TextFaint)
 
 	s.MessageContent = lipgloss.NewStyle().

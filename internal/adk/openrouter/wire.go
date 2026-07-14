@@ -31,10 +31,34 @@ type chatStreamOptions struct {
 // are a subset of what a full message can hold, so one struct covers
 // both without needing a second near-identical type.
 type chatMessage struct {
-	Role       string         `json:"role,omitempty"`
-	Content    string         `json:"content,omitempty"`
-	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
+	Role    string `json:"role,omitempty"`
+	Content string `json:"content,omitempty"`
+	// Reasoning/ReasoningDetails are OpenRouter's two reasoning-output
+	// shapes, normalized across providers regardless of what the
+	// underlying API calls it natively (DeepSeek's reasoning_content,
+	// Anthropic's thinking blocks, ...) — see
+	// https://openrouter.ai/docs/use-cases/reasoning-tokens. Reasoning is
+	// the simpler plaintext field and the more universally populated of
+	// the two; ReasoningDetails is the newer, structured shape some
+	// providers use instead (or alongside) — see reasoningText, which
+	// combines both into one plaintext string. Only ever populated on an
+	// inbound response/delta — never set when this struct is used to
+	// build an outbound request message.
+	Reasoning        string                `json:"reasoning,omitempty"`
+	ReasoningDetails []chatReasoningDetail `json:"reasoning_details,omitempty"`
+	ToolCalls        []chatToolCall        `json:"tool_calls,omitempty"`
+	ToolCallID       string                `json:"tool_call_id,omitempty"`
+}
+
+// chatReasoningDetail is one entry of a message/delta's reasoning_details
+// array. Type discriminates what's actually in it — only "reasoning.text"
+// and "reasoning.summary" carry human-readable content; "reasoning.
+// encrypted" (Data) is opaque provider-verification data with nothing to
+// display, so it's not even given a field here.
+type chatReasoningDetail struct {
+	Type    string `json:"type"`
+	Text    string `json:"text,omitempty"`    // type == "reasoning.text"
+	Summary string `json:"summary,omitempty"` // type == "reasoning.summary"
 }
 
 type chatToolCall struct {

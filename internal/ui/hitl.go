@@ -176,11 +176,17 @@ func (a *App) resolveConfirmation(approved bool) tea.Cmd {
 	}
 	a.status = theme.StatusThinking
 	a.workingLabel = "thinking"
+	// Should already be false by this point — a tool call ends reasoning
+	// the moment it arrives, and a confirmation only ever follows one —
+	// but going through endReasoning rather than a raw a.reasoning=false
+	// keeps the stopwatch's own running flag from ever going stale, in
+	// case some future ordering doesn't hold.
+	reasonCmd := a.endReasoning()
 	a.followTranscript()
 
 	backend := a.backend
 	animCmd := a.startWorkingAnim()
-	return tea.Batch(animCmd, func() tea.Msg {
+	return tea.Batch(animCmd, reasonCmd, func() tea.Msg {
 		ch, err := backend.RespondToConfirmation(context.Background(), a.sessionID, pc.id, approved)
 		if err != nil {
 			return agentReplyMsg{err: err}

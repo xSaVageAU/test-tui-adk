@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/stopwatch"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -62,12 +63,36 @@ type App struct {
 	// specialists internally via agent-as-tool, but that's invisible at
 	// this layer — see ui.StreamChunk), so unlike most of what's in this
 	// struct, this never changes after NewApp.
-	agentName      string
-	status         theme.StatusKind
-	messages       []ChatMessage
-	highlightUser  bool   // experimental: backdrop highlight behind user messages
-	streamReplies  bool   // token-by-token replies via Backend.Stream instead of Send
-	verboseTools   bool   // false shows a one-line lean summary per tool call/result; see chat.go's formatToolArgs/formatToolResult
+	agentName     string
+	status        theme.StatusKind
+	messages      []ChatMessage
+	highlightUser bool // experimental: backdrop highlight behind user messages
+	streamReplies bool // token-by-token replies via Backend.Stream instead of Send
+	verboseTools  bool // false shows a one-line lean summary per tool call/result; see chat.go's formatToolArgs/formatToolResult
+	// reasoning is true whenever the model is actively sending reasoning/
+	// thinking chunks (StreamChunk.Reasoning) rather than its real reply.
+	// Cleared the moment anything else arrives (real text, a tool call,
+	// the stream ending) since those all mean the reasoning phase is
+	// over — see startReasoning/endReasoning. The reasoning text itself
+	// is received but not rendered anywhere yet — this (plus
+	// ChatMessage.ReasoningActive/ReasoningDuration and reasoningStart/
+	// stopwatch below) is deliberately just the detection/timing half of
+	// a "show reasoning" feature, not the display-the-actual-text half.
+	//
+	// reasoningStart is the actual wall-clock source of truth for how
+	// long a burst took (time.Since(reasoningStart) both live and at the
+	// end) — real reasoning bursts turned out to often finish in well
+	// under a second, so a value quantized to stopwatch's own tick
+	// interval was never precise enough to show anything but "0s".
+	// stopwatch is kept purely as a periodic wake-up source driving live
+	// re-renders while active (its own Elapsed() isn't read) — a fresh
+	// Model per burst, since its ticks carry a per-instance ID, so a
+	// stray tick from a previous burst is safely ignored if it arrives
+	// after a new one has already started. Ticks flow through Update's
+	// stopwatch.TickMsg/StartStopMsg cases.
+	reasoning      bool
+	reasoningStart time.Time
+	stopwatch      stopwatch.Model
 	lastPromptText string // most recent user message; backs the sticky-prompt overlay in View()
 
 	hitlMode            hitlMode       // how a pending tool approval is presented — see hitl.go
@@ -249,6 +274,25 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, workingAnimTick()
 
+	case stopwatch.TickMsg:
+		var cmd tea.Cmd
+		a.stopwatch, cmd = a.stopwatch.Update(msg)
+		// Reject a stray tick from a burst that's already ended (its own
+		// ID won't match a.stopwatch's current one, but a.reasoning being
+		// false is the simpler check — either way nothing should update).
+		// The duration itself comes from reasoningStart, not the
+		// stopwatch's own Elapsed() — see App.reasoning's doc comment.
+		if a.reasoning && a.streamingMsgIndex < len(a.messages) {
+			a.messages[a.streamingMsgIndex].ReasoningDuration = time.Since(a.reasoningStart)
+			a.refreshTranscript()
+		}
+		return a, cmd
+
+	case stopwatch.StartStopMsg:
+		var cmd tea.Cmd
+		a.stopwatch, cmd = a.stopwatch.Update(msg)
+		return a, cmd
+
 	case agentReplyMsg:
 		if msg.err != nil {
 			a.status = theme.StatusError
@@ -274,6 +318,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !msg.ok {
 			a.streamChan = nil
 			a.status = theme.StatusIdle
+			endCmd := a.endReasoning()
 			a.dropEmptyStreamingPlaceholder()
 			// pendingConfirmation set means this channel close is a HITL
 			// pause, not the turn actually ending — resolveConfirmation
@@ -283,14 +328,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.attachTurnUsage()
 			}
 			a.followTranscript()
-			return a, nil
+			return a, endCmd
 		}
 		if msg.chunk.Err != nil {
 			a.streamChan = nil
 			a.status = theme.StatusError
+			endCmd := a.endReasoning()
 			a.systemMessage("Error: " + msg.chunk.Err.Error())
-			return a, nil
+			return a, endCmd
 		}
+		var cmd tea.Cmd
 		switch {
 		case msg.chunk.Confirmation != nil:
 			// The run pauses itself right after this — nothing more will
@@ -299,6 +346,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// closing rather than looping forever.
 			a.insertConfirmMessage(msg.chunk.Confirmation)
 		case msg.chunk.ToolCall != nil:
+			cmd = a.endReasoning()
 			a.upsertToolMessage(msg.chunk.ToolCall.ID, msg.chunk.ToolCall.Name, msg.chunk.ToolCall.Args, toolStatusRunning, false)
 			a.workingLabel = "using " + msg.chunk.ToolCall.Name
 		case msg.chunk.ToolResult != nil:
@@ -308,11 +356,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.accumulateUsage(msg.chunk.Usage)
 		case msg.chunk.FinishReason != "":
 			a.turnFinishReason = msg.chunk.FinishReason
+		case msg.chunk.Reasoning != "":
+			cmd = a.startReasoning()
 		default:
+			cmd = a.endReasoning()
 			a.messages[a.streamingMsgIndex].Content += msg.chunk.Text
 		}
 		a.followTranscript()
-		return a, readStreamChunk(a.streamChan)
+		return a, tea.Batch(cmd, readStreamChunk(a.streamChan))
 
 	case keySetMsg:
 		if msg.err != nil {
@@ -546,6 +597,7 @@ func (a *App) sendMessage(text string) tea.Cmd {
 func (a *App) dispatchToBackend(text string) tea.Cmd {
 	a.status = theme.StatusThinking
 	a.workingLabel = "thinking"
+	a.reasoning = false
 	a.turnUsage, a.turnFinishReason = nil, ""
 	backend := a.backend
 	animCmd := a.startWorkingAnim()
@@ -628,6 +680,56 @@ func (a *App) accumulateUsage(u *TokenUsage) {
 	}
 	a.turnUsage.Output += u.Output
 	a.turnUsage.Total = a.turnUsage.Prompt + a.turnUsage.Output
+}
+
+// reasoningTickInterval drives both the live "thinking Xms/Xs" re-render
+// cadence and, indirectly, the finest resolution a burst that ends
+// between ticks could show live (the final frozen duration is always
+// precise regardless — see endReasoning — this only affects what's
+// visible while still counting up). 100ms rather than stopwatch's own
+// 1s default: real reasoning bursts turned out to often finish well
+// under a second, and at a 1s interval the very first tick usually
+// never even fired before reasoning ended, leaving the badge stuck at
+// "0s" the whole time and the final duration landing on exactly zero.
+const reasoningTickInterval = 100 * time.Millisecond
+
+// startReasoning marks the current streaming message as actively
+// reasoning, records when it started, and starts a stopwatch purely as
+// a periodic wake-up source for live re-renders (see App.reasoning's
+// doc comment for why the displayed duration itself comes from
+// reasoningStart, not the stopwatch's own Elapsed()). Idempotent (a
+// no-op if already reasoning), since every reasoning chunk in a burst
+// hits this same case, not just the first.
+func (a *App) startReasoning() tea.Cmd {
+	if a.reasoning {
+		return nil
+	}
+	a.reasoning = true
+	a.reasoningStart = time.Now()
+	a.stopwatch = stopwatch.NewWithInterval(reasoningTickInterval)
+	if a.streamingMsgIndex < len(a.messages) {
+		a.messages[a.streamingMsgIndex].ReasoningActive = true
+		a.messages[a.streamingMsgIndex].ReasoningDuration = 0
+	}
+	return a.stopwatch.Start()
+}
+
+// endReasoning freezes the current streaming message's reasoning
+// duration at the precise wall-clock time elapsed since startReasoning
+// and stops the stopwatch — called from every place a turn's reasoning
+// phase can end: real text arriving, a tool call, the stream closing,
+// or an error. Idempotent (a no-op, returning nil, if reasoning wasn't
+// active) so every one of those call sites can call it unconditionally.
+func (a *App) endReasoning() tea.Cmd {
+	if !a.reasoning {
+		return nil
+	}
+	a.reasoning = false
+	if a.streamingMsgIndex < len(a.messages) {
+		a.messages[a.streamingMsgIndex].ReasoningActive = false
+		a.messages[a.streamingMsgIndex].ReasoningDuration = time.Since(a.reasoningStart)
+	}
+	return a.stopwatch.Stop()
 }
 
 // attachTurnUsage lands the turn's accumulated usage/finish-reason on the

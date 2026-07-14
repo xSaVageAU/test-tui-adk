@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"tui-testing/internal/theme"
 
@@ -70,6 +71,9 @@ func renderMessage(s theme.Styles, m ChatMessage, width int, highlightUser, verb
 		return lipgloss.JoinVertical(lipgloss.Left, label, bubble)
 	case RoleAgent:
 		label := s.MessageAgent.Render("agent")
+		if badge := renderReasoningBadge(s, m); badge != "" {
+			label += "  " + badge
+		}
 		content := s.MessageContent.Width(width).Render(m.Content)
 		lines := []string{label, content}
 		if m.FinishReason != "" {
@@ -177,6 +181,35 @@ func renderToolStatusLine(s theme.Styles, style lipgloss.Style, text string, wid
 // just its last one. See App.attachTurnUsage.
 func renderUsage(s theme.Styles, u *TokenUsage) string {
 	return s.MessageMeta.Render(fmt.Sprintf("%d in · %d out · %d tokens", u.Prompt, u.Output, u.Total))
+}
+
+// renderReasoningBadge draws whatever belongs next to the "agent" label
+// for m's reasoning state — a filled "thinking <duration>" badge while
+// active (App.reasoningStart/stopwatch live-update m.ReasoningDuration
+// every reasoningTickInterval, so this re-renders with a new number each
+// tick), or, once it's done, a quiet permanent "thought for <duration>"
+// note — same weight as the usage line, not something that needs to
+// keep grabbing attention once the number is final. "" (append nothing)
+// if this message never reasoned at all.
+func renderReasoningBadge(s theme.Styles, m ChatMessage) string {
+	switch {
+	case m.ReasoningActive:
+		return s.ReasoningBadge.Render("thinking " + formatReasoningDuration(m.ReasoningDuration))
+	case m.ReasoningDuration > 0:
+		return s.ReasoningNote.Render("thought for " + formatReasoningDuration(m.ReasoningDuration))
+	default:
+		return ""
+	}
+}
+
+// formatReasoningDuration favors milliseconds under a second — real
+// reasoning bursts often finish well under one, and "0s" for all of
+// them would defeat the entire point of timing this at all.
+func formatReasoningDuration(d time.Duration) string {
+	if d < time.Second {
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	}
+	return fmt.Sprintf("%.1fs", d.Seconds())
 }
 
 // renderFinishReason draws a note under an agent reply when the model's

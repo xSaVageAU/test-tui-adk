@@ -3,6 +3,9 @@ package ui
 import (
 	"strings"
 	"testing"
+	"time"
+
+	"tui-testing/internal/theme"
 )
 
 // These are pure-function tests, not TUI-driving — formatToolArgs/
@@ -172,5 +175,55 @@ func TestIntFromAny(t *testing.T) {
 	}
 	if _, ok := intFromAny(nil); ok {
 		t.Error("intFromAny(nil) should not be ok")
+	}
+}
+
+func TestRenderReasoningBadge(t *testing.T) {
+	s := theme.New(theme.Load()[0])
+
+	if got := renderReasoningBadge(s, ChatMessage{}); got != "" {
+		t.Errorf("never-reasoned message: got %q, want \"\"", got)
+	}
+
+	active := ChatMessage{ReasoningActive: true, ReasoningDuration: 3200 * time.Millisecond}
+	if got := renderReasoningBadge(s, active); !strings.Contains(got, "thinking 3.2s") {
+		t.Errorf("active message: got %q, want it to contain %q", got, "thinking 3.2s")
+	}
+
+	done := ChatMessage{ReasoningActive: false, ReasoningDuration: 7 * time.Second}
+	if got := renderReasoningBadge(s, done); !strings.Contains(got, "thought for 7.0s") {
+		t.Errorf("done message: got %q, want it to contain %q", got, "thought for 7.0s")
+	}
+
+	// ReasoningActive takes priority if somehow both are set (shouldn't
+	// happen in practice — endReasoning always clears Active in the same
+	// write that sets Duration — but the render logic should still pick
+	// one deterministically rather than, say, concatenating both).
+	both := ChatMessage{ReasoningActive: true, ReasoningDuration: 2 * time.Second}
+	if got := renderReasoningBadge(s, both); !strings.Contains(got, "thinking") || strings.Contains(got, "thought for") {
+		t.Errorf("active+duration message: got %q, want only the active form", got)
+	}
+}
+
+// TestFormatReasoningDuration is the actual fix this round: a reasoning
+// burst that finishes in well under a second (common, per live
+// feedback) used to always read "0s" — quantized to stopwatch's 1s tick
+// interval and truncated to whole seconds on top of that — which made
+// the whole feature look broken even when it was working correctly.
+func TestFormatReasoningDuration(t *testing.T) {
+	cases := []struct {
+		d    time.Duration
+		want string
+	}{
+		{340 * time.Millisecond, "340ms"},
+		{0, "0ms"},
+		{999 * time.Millisecond, "999ms"},
+		{time.Second, "1.0s"},
+		{3200 * time.Millisecond, "3.2s"},
+	}
+	for _, c := range cases {
+		if got := formatReasoningDuration(c.d); got != c.want {
+			t.Errorf("formatReasoningDuration(%v) = %q, want %q", c.d, got, c.want)
+		}
 	}
 }
