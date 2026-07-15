@@ -62,9 +62,10 @@ const (
 	toolStatusRunning = "running…"
 )
 
-// pendingConfirmation tracks the one tool-approval request currently
-// blocking the conversation (ADK only ever has one turn in flight, so
-// there's only ever one of these at a time).
+// pendingConfirmation is one tool-approval request. App.pendingConfirmation
+// tracks whichever one is currently being shown/decided; App.confirmQueue
+// holds any more from the same parallel batch waiting their turn — see
+// insertConfirmMessage/resolveConfirmation.
 type pendingConfirmation struct {
 	id       string // pass back to Backend.RespondToConfirmation
 	tool     string
@@ -82,31 +83,51 @@ func (a *App) pendingStatusText() string {
 // insertConfirmMessage folds a tool-approval request into the same
 // transcript entry its originating call already created — keyed by
 // OriginalID, the ID that call's own ToolCall.ID carried — rather than
-// appending a second entry for what's really one invocation. In Modal
-// mode it also opens the popup for it immediately.
+// appending a second entry for what's really one invocation.
+//
+// If nothing's currently pending, this one becomes pendingConfirmation
+// right away (opening the popup immediately in Modal mode) exactly as
+// before. If something's already showing — a parallel batch delivering a
+// second or third request before the first has been decided — this one
+// queues instead of replacing it; resolveConfirmation activates queued
+// entries one at a time as each is decided. Every request in the
+// transcript gets its "awaiting decision" status the moment it arrives
+// either way, queued or not.
 func (a *App) insertConfirmMessage(c *ToolConfirmationRequest) {
 	key := c.OriginalID
 	if key == "" {
 		key = c.ID
 	}
 	a.upsertToolMessage(key, c.Tool, c.Args, a.pendingStatusText(), true)
-	a.pendingConfirmation = &pendingConfirmation{
+	pc := &pendingConfirmation{
 		id:       c.ID,
 		tool:     c.Tool,
 		args:     c.Args,
 		msgIndex: a.toolMsgIndex[key],
 	}
 
+	if a.pendingConfirmation != nil {
+		a.confirmQueue = append(a.confirmQueue, pc)
+		return
+	}
+	a.pendingConfirmation = pc
 	if a.hitlMode == hitlModal {
 		a.openConfirmModal()
 	}
 }
 
 // openConfirmModal shows the Approve/Deny popup — Modal mode opens this
-// automatically the moment a confirmation request arrives.
+// automatically the moment a confirmation request arrives, and again for
+// each subsequent request in the same batch as resolveConfirmation
+// activates it. The "(N of M)" suffix only shows once there's more than
+// one in the batch, so a lone confirmation looks exactly as it always
+// has.
 func (a *App) openConfirmModal() {
 	pc := a.pendingConfirmation
 	title := fmt.Sprintf("Approve %s(%s)?", pc.tool, formatKV(pc.args))
+	if total := len(a.confirmDecisions) + 1 + len(a.confirmQueue); total > 1 {
+		title = fmt.Sprintf("%s (%d of %d)", title, len(a.confirmDecisions)+1, total)
+	}
 	items := []paletteItem{
 		{id: "approve", title: "Approve"},
 		{id: "deny", title: "Deny"},
@@ -154,17 +175,20 @@ func (a *App) handlePendingConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 }
 
 // resolveConfirmation records the decision on the pending confirmation's
-// transcript entry, closes the popup if one was open, and resumes the
-// run via Backend.RespondToConfirmation — which streams exactly like a
-// fresh message send, so the result rides the existing streamStartMsg /
-// streamChunkMsg machinery rather than needing a parallel path.
+// transcript entry, then either activates the next request queued from
+// the same parallel batch (see insertConfirmMessage) — leaving the run
+// paused — or, once every request in the batch has an answer, sends them
+// all to Backend.RespondToConfirmation together and resumes the run,
+// which streams exactly like a fresh message send, so the result rides
+// the existing streamStartMsg/streamChunkMsg machinery rather than
+// needing a parallel path. See RespondToConfirmation's doc comment for
+// why the batch has to go in one round trip rather than as each is
+// decided.
 func (a *App) resolveConfirmation(approved bool) tea.Cmd {
 	pc := a.pendingConfirmation
 	if pc == nil {
 		return nil
 	}
-	a.pendingConfirmation = nil
-	a.closeMenu()
 
 	status := confirmStatusDenied
 	if approved {
@@ -174,6 +198,22 @@ func (a *App) resolveConfirmation(approved bool) tea.Cmd {
 		a.messages[pc.msgIndex].ToolStatus = status
 		a.messages[pc.msgIndex].ToolPending = false
 	}
+	a.confirmDecisions = append(a.confirmDecisions, ConfirmationDecision{ID: pc.id, Approved: approved})
+
+	if len(a.confirmQueue) > 0 {
+		a.pendingConfirmation, a.confirmQueue = a.confirmQueue[0], a.confirmQueue[1:]
+		if a.hitlMode == hitlModal {
+			a.openConfirmModal()
+		}
+		a.followTranscript()
+		return nil
+	}
+
+	a.pendingConfirmation = nil
+	a.closeMenu()
+	decisions := a.confirmDecisions
+	a.confirmDecisions = nil
+
 	a.status = theme.StatusThinking
 	a.workingLabel = "thinking"
 	// Should already be false by this point — a tool call ends reasoning
@@ -185,9 +225,10 @@ func (a *App) resolveConfirmation(approved bool) tea.Cmd {
 	a.followTranscript()
 
 	backend := a.backend
+	sessionID := a.sessionID
 	animCmd := a.startWorkingAnim()
 	return tea.Batch(animCmd, reasonCmd, func() tea.Msg {
-		ch, err := backend.RespondToConfirmation(context.Background(), a.sessionID, pc.id, approved)
+		ch, err := backend.RespondToConfirmation(context.Background(), sessionID, decisions)
 		if err != nil {
 			return agentReplyMsg{err: err}
 		}

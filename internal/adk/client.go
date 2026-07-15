@@ -181,23 +181,38 @@ func (c *Client) Stream(ctx context.Context, sessionID, message string) (<-chan 
 	return c.runStream(ctx, sessionID, msg), nil
 }
 
-// RespondToConfirmation answers a pending tool-approval request and
-// resumes the run. Per toolconfirmation's own doc comment, this means
-// sending a FunctionResponse with the *same ID* as the confirmation
-// request, named toolconfirmation.FunctionCallName, with a
+// RespondToConfirmation answers one or more pending tool-approval
+// requests and resumes the run. Per toolconfirmation's own doc comment,
+// each answer means sending a FunctionResponse with the *same ID* as its
+// confirmation request, named toolconfirmation.FunctionCallName, with a
 // {"confirmed": bool} response payload — ADK then either runs the
 // original tool call or reports it declined, either way producing more
 // events on the returned channel exactly like a fresh Stream call would.
-func (c *Client) RespondToConfirmation(ctx context.Context, sessionID, requestID string, approved bool) (<-chan ui.StreamChunk, error) {
-	content := &genai.Content{
-		Role: string(genai.RoleUser),
-		Parts: []*genai.Part{{
+//
+// Every decision is sent as its own Part within a single Content/message
+// rather than one call each: ADK's RequestConfirmationRequestProcessor
+// (internal to the ADK module) matches answers back to their original
+// calls by scanning only the single most recent message for
+// FunctionResponses, so parallel tool calls that all requested
+// confirmation in the same turn (see internal/adk/tools/gate.go's
+// package doc comment on why those race) have to be answered together
+// here — a decision sent in its own separate call would leave any others
+// from the same batch unresolved indefinitely rather than getting picked
+// up later.
+func (c *Client) RespondToConfirmation(ctx context.Context, sessionID string, decisions []ui.ConfirmationDecision) (<-chan ui.StreamChunk, error) {
+	parts := make([]*genai.Part, len(decisions))
+	for i, d := range decisions {
+		parts[i] = &genai.Part{
 			FunctionResponse: &genai.FunctionResponse{
-				ID:       requestID,
+				ID:       d.ID,
 				Name:     toolconfirmation.FunctionCallName,
-				Response: map[string]any{"confirmed": approved},
+				Response: map[string]any{"confirmed": d.Approved},
 			},
-		}},
+		}
+	}
+	content := &genai.Content{
+		Role:  string(genai.RoleUser),
+		Parts: parts,
 	}
 	return c.runStream(ctx, sessionID, content), nil
 }

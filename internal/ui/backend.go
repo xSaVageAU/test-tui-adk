@@ -25,13 +25,19 @@ type Backend interface {
 	// RespondToConfirmation is called with that chunk's ID.
 	Stream(ctx context.Context, sessionID, message string) (<-chan StreamChunk, error)
 
-	// RespondToConfirmation answers a pending ToolConfirmationRequest
-	// (requestID is its ID field) and resumes the run — approved lets the
-	// tool execute, denied reports it as declined. Returns a channel
-	// shaped exactly like Stream's, since resuming can itself produce
-	// more text, tool calls, or even another confirmation request before
-	// the turn finishes.
-	RespondToConfirmation(ctx context.Context, sessionID, requestID string, approved bool) (<-chan StreamChunk, error)
+	// RespondToConfirmation answers one or more pending
+	// ToolConfirmationRequests from the same turn in a single round trip
+	// and resumes the run — approved lets a tool execute, denied reports
+	// it as declined. Every decision from one parallel batch (see
+	// ToolConfirmationRequest's doc comment) must be sent together: ADK
+	// matches answers back to their original calls by scanning the single
+	// most recent message for FunctionResponses, so a decision sent in
+	// its own separate call would leave any others from the same batch
+	// unresolved indefinitely rather than getting picked up by a later
+	// call. Returns a channel shaped exactly like Stream's, since
+	// resuming can itself produce more text, tool calls, or even another
+	// confirmation request before the turn finishes.
+	RespondToConfirmation(ctx context.Context, sessionID string, decisions []ConfirmationDecision) (<-chan StreamChunk, error)
 
 	// ListSessions returns every past session for the current user, in
 	// no particular order (the caller sorts) — backs the /sessions
@@ -117,12 +123,25 @@ type ToolResult struct {
 // that call's ToolCall.ID carried) and is what the UI uses to find and
 // update that call's existing transcript entry rather than appending a
 // duplicate one for the confirmation.
+//
+// More than one of these can arrive for the same turn — parallel tool
+// calls (ADK runs a turn's function calls in unordered goroutines, see
+// internal/adk/tools/gate.go's package doc comment) that each require
+// confirmation all get requested at once. See RespondToConfirmation for
+// why every one from the same batch has to be answered together.
 type ToolConfirmationRequest struct {
 	ID         string
 	OriginalID string
 	Tool       string
 	Args       map[string]any
 	Hint       string // human-readable explanation, if the tool provided one; may be ""
+}
+
+// ConfirmationDecision is one answered ToolConfirmationRequest — ID
+// matches the request's own ID, Approved is the user's decision.
+type ConfirmationDecision struct {
+	ID       string
+	Approved bool
 }
 
 // BackendFactory builds a Backend from a user-supplied API key for the

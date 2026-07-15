@@ -91,6 +91,16 @@ type App struct {
 	hitlMode            hitlMode       // how a pending tool approval is presented — see hitl.go
 	permissionMode      permissionMode // whether a confirmation-gated tool call asks at all — see permissions.go
 	pendingConfirmation *pendingConfirmation
+	// confirmQueue/confirmDecisions back a batch of confirmations that
+	// arrived together (parallel tool calls all requiring approval in the
+	// same turn — see gate.go's package doc comment on why those race).
+	// confirmQueue holds ones that arrived but haven't been shown yet;
+	// confirmDecisions holds answers for ones already shown, waiting for
+	// the rest of the batch. See hitl.go's insertConfirmMessage/
+	// resolveConfirmation for why the whole batch is sent back together
+	// in one round trip rather than as they're each decided.
+	confirmQueue     []*pendingConfirmation
+	confirmDecisions []ConfirmationDecision
 
 	// In-flight stream state, set by streamStartMsg and cleared once the
 	// channel closes or errors — see dispatchToBackend and the

@@ -32,12 +32,14 @@ const workingAnimHeight = 2
 type workingAnimVariant int
 
 const (
-	animPulseWave workingAnimVariant = iota
+	// animEqualizer is first — the default (see parseWorkingAnimVariant's
+	// fallback) and /loader's top row, both because it's index 0 here.
+	animEqualizer workingAnimVariant = iota
+	animPulseWave
 	animOrbit
 	animGlitchScan
 	animCylonScanner
 	animBouncingDots
-	animEqualizer
 	animMatrixRain
 	animBrailleWave
 	animRadarSweep
@@ -49,12 +51,12 @@ const (
 // settings.json's workingAnim field — same convention /theme already
 // uses for theme names.
 var workingAnimNames = [workingAnimCount]string{
+	"Equalizer",
 	"Pulse Wave",
 	"Orbit",
 	"Glitch Scan",
 	"Cylon Scanner",
 	"Bouncing Dots",
-	"Equalizer",
 	"Matrix Rain",
 	"Braille Wave",
 	"Radar Sweep",
@@ -67,7 +69,7 @@ func parseWorkingAnimVariant(name string) workingAnimVariant {
 			return workingAnimVariant(i)
 		}
 	}
-	return animPulseWave
+	return animEqualizer
 }
 
 // workingAnimState is the animation's whole live state: which variant
