@@ -7,7 +7,7 @@ import (
 
 	"tui-testing/internal/theme"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 // These are pure-function tests, not TUI-driving — formatToolArgs/

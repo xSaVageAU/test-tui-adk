@@ -1,6 +1,6 @@
 package ui
 
-import "github.com/charmbracelet/bubbles/key"
+import "charm.land/bubbles/v2/key"
 
 // keyMap centralizes every global keybinding so help text and Update's
 // switch statement can't drift apart. Deliberately small: everything that

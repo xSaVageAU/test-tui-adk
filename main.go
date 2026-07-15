@@ -8,7 +8,7 @@ import (
 	"tui-testing/internal/adk"
 	"tui-testing/internal/ui"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // newBackend adapts adk.New to ui.BackendFactory — *adk.Client isn't
@@ -117,10 +117,11 @@ func main() {
 		SetAgentModel:    adk.SetAgentModel,
 	})
 
-	// WithMouseCellMotion is what actually makes the terminal report wheel
-	// events at all — the chat viewport has MouseWheelEnabled by default,
-	// but nothing reached it without this.
-	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	// AltScreen and MouseMode are set on the tea.View returned from
+	// App.View() now (v2 moved these from Program options to per-View
+	// declarative fields) — the chat viewport has MouseWheelEnabled by
+	// default, but nothing reached it without MouseMode set there.
+	p := tea.NewProgram(app)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)

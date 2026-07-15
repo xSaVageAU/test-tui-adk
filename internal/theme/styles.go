@@ -1,6 +1,6 @@
 package theme
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 // Styles is the compiled set of widget-level styles for a given Theme.
 // Build a fresh Styles whenever the active Theme changes; nothing here
@@ -171,17 +171,17 @@ func New(t Theme) Styles {
 	s := Styles{Theme: t}
 
 	s.App = lipgloss.NewStyle().
-		Background(t.Background).
-		Foreground(t.Text)
+		Background(lipgloss.Color(t.Background)).
+		Foreground(lipgloss.Color(t.Text))
 
 	s.Header = lipgloss.NewStyle().
-		Background(t.Background).
-		Foreground(t.TextMuted).
+		Background(lipgloss.Color(t.Background)).
+		Foreground(lipgloss.Color(t.TextMuted)).
 		Padding(0, 1)
 
 	s.HeaderRule = lipgloss.NewStyle().
-		Background(t.Background).
-		Foreground(t.Border)
+		Background(lipgloss.Color(t.Background)).
+		Foreground(lipgloss.Color(t.Border))
 
 	// HeaderTitle also backs every plain connector fragment inside a
 	// composite line built by concatenating several separately-rendered
@@ -194,12 +194,12 @@ func New(t Theme) Styles {
 	// Render() call, so a background has to be set on every individual
 	// fragment, not just the thing that joins them.
 	s.HeaderTitle = lipgloss.NewStyle().
-		Background(t.Background).
-		Foreground(t.TextFaint)
+		Background(lipgloss.Color(t.Background)).
+		Foreground(lipgloss.Color(t.TextFaint))
 
 	s.HeaderSession = lipgloss.NewStyle().
-		Background(t.Highlight).
-		Foreground(t.Accent).
+		Background(lipgloss.Color(t.Highlight)).
+		Foreground(lipgloss.Color(t.Accent)).
 		Bold(true).
 		Padding(0, 1)
 
@@ -207,11 +207,11 @@ func New(t Theme) Styles {
 		base := lipgloss.NewStyle().Bold(true)
 		switch status {
 		case StatusThinking:
-			return base.Foreground(t.Warning)
+			return base.Foreground(lipgloss.Color(t.Warning))
 		case StatusError:
-			return base.Foreground(t.Error)
+			return base.Foreground(lipgloss.Color(t.Error))
 		default:
-			return base.Foreground(t.Success)
+			return base.Foreground(lipgloss.Color(t.Success))
 		}
 	}
 
@@ -220,14 +220,14 @@ func New(t Theme) Styles {
 		// empty portion) is a partial-coverage glyph — its own gaps would
 		// otherwise show the terminal's raw background instead of ours,
 		// unlike "█" which fills its whole cell regardless.
-		base := lipgloss.NewStyle().Background(t.Background)
+		base := lipgloss.NewStyle().Background(lipgloss.Color(t.Background))
 		switch {
 		case frac >= 0.9:
-			return base.Foreground(t.Error)
+			return base.Foreground(lipgloss.Color(t.Error))
 		case frac >= 0.7:
-			return base.Foreground(t.Warning)
+			return base.Foreground(lipgloss.Color(t.Warning))
 		default:
-			return base.Foreground(t.Success)
+			return base.Foreground(lipgloss.Color(t.Success))
 		}
 	}
 
@@ -238,126 +238,126 @@ func New(t Theme) Styles {
 	// background instead of showing the terminal's raw default below the
 	// last message.
 	s.Viewport = lipgloss.NewStyle().
-		Background(t.Background).
-		Foreground(t.Text)
+		Background(lipgloss.Color(t.Background)).
+		Foreground(lipgloss.Color(t.Text))
 
 	s.MessageUser = lipgloss.NewStyle().
-		Background(t.Background).
-		Foreground(t.Accent).
+		Background(lipgloss.Color(t.Background)).
+		Foreground(lipgloss.Color(t.Accent)).
 		Bold(true)
 
 	s.MessageAgent = lipgloss.NewStyle().
-		Background(t.Background).
-		Foreground(t.TextMuted).
+		Background(lipgloss.Color(t.Background)).
+		Foreground(lipgloss.Color(t.TextMuted)).
 		Bold(true)
 
 	s.MessageSystem = lipgloss.NewStyle().
-		Background(t.Background).
-		Foreground(t.TextFaint).
+		Background(lipgloss.Color(t.Background)).
+		Foreground(lipgloss.Color(t.TextFaint)).
 		Italic(true)
 
 	s.MessageEvent = lipgloss.NewStyle().
-		Background(t.Highlight).
-		Foreground(t.Accent).
+		Background(lipgloss.Color(t.Highlight)).
+		Foreground(lipgloss.Color(t.Accent)).
 		Bold(true).
 		Padding(0, 1)
 
 	s.ReasoningBadge = lipgloss.NewStyle().
-		Background(t.Reasoning).
-		Foreground(t.TextOnFill).
+		Background(lipgloss.Color(t.Reasoning)).
+		Foreground(lipgloss.Color(t.TextOnFill)).
 		Bold(true).
 		Padding(0, 1)
 
 	s.ReasoningNote = lipgloss.NewStyle().
-		Background(t.Background).
-		Foreground(t.TextFaint)
+		Background(lipgloss.Color(t.Background)).
+		Foreground(lipgloss.Color(t.TextFaint))
 
 	s.ReasoningText = lipgloss.NewStyle().
-		Background(t.Background).
-		Foreground(t.TextFaint).
+		Background(lipgloss.Color(t.Background)).
+		Foreground(lipgloss.Color(t.TextFaint)).
 		Italic(true)
 
 	s.MessageContent = lipgloss.NewStyle().
-		Background(t.Background).
-		Foreground(t.Text)
+		Background(lipgloss.Color(t.Background)).
+		Foreground(lipgloss.Color(t.Text))
 
 	s.MessageUserBubble = lipgloss.NewStyle().
-		Background(t.Highlight).
-		Foreground(t.Text).
+		Background(lipgloss.Color(t.Highlight)).
+		Foreground(lipgloss.Color(t.Text)).
 		Padding(0, 1)
 
 	s.MessageFinishWarning = lipgloss.NewStyle().
-		Background(t.Background).
-		Foreground(t.Warning)
+		Background(lipgloss.Color(t.Background)).
+		Foreground(lipgloss.Color(t.Warning))
 
 	s.MessageFinishBlocked = lipgloss.NewStyle().
-		Background(t.Background).
-		Foreground(t.Error).
+		Background(lipgloss.Color(t.Background)).
+		Foreground(lipgloss.Color(t.Error)).
 		Bold(true)
 
 	s.ToolGutter = lipgloss.NewStyle().
-		Background(t.Background).
-		Foreground(t.Attention)
+		Background(lipgloss.Color(t.Background)).
+		Foreground(lipgloss.Color(t.Attention))
 
 	s.ToolCallName = lipgloss.NewStyle().
-		Background(t.Attention).
-		Foreground(t.TextOnFill).
+		Background(lipgloss.Color(t.Attention)).
+		Foreground(lipgloss.Color(t.TextOnFill)).
 		Bold(true).
 		Padding(0, 1)
 
 	s.ToolCallArgs = lipgloss.NewStyle().
-		Background(t.Background).
-		Foreground(t.TextMuted)
+		Background(lipgloss.Color(t.Background)).
+		Foreground(lipgloss.Color(t.TextMuted))
 
 	s.ToolResult = lipgloss.NewStyle().
-		Background(t.Background).
-		Foreground(t.TextFaint)
+		Background(lipgloss.Color(t.Background)).
+		Foreground(lipgloss.Color(t.TextFaint))
 
 	s.ToolConfirmPending = lipgloss.NewStyle().
-		Background(t.Attention).
-		Foreground(t.TextOnFill).
+		Background(lipgloss.Color(t.Attention)).
+		Foreground(lipgloss.Color(t.TextOnFill)).
 		Bold(true)
 
 	s.ToolConfirmApproved = lipgloss.NewStyle().
-		Background(t.Background).
-		Foreground(t.Success)
+		Background(lipgloss.Color(t.Background)).
+		Foreground(lipgloss.Color(t.Success))
 
 	s.ToolConfirmDenied = lipgloss.NewStyle().
-		Background(t.Background).
-		Foreground(t.Error)
+		Background(lipgloss.Color(t.Background)).
+		Foreground(lipgloss.Color(t.Error))
 
 	s.StickyPrompt = lipgloss.NewStyle().
-		Background(t.Highlight).
-		Foreground(t.Text).
+		Background(lipgloss.Color(t.Highlight)).
+		Foreground(lipgloss.Color(t.Text)).
 		Bold(true)
 
 	s.BootBorder = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(t.Accent).
-		BorderBackground(t.Background).
-		Background(t.Surface).
+		BorderForeground(lipgloss.Color(t.Accent)).
+		BorderBackground(lipgloss.Color(t.Background)).
+		Background(lipgloss.Color(t.Surface)).
 		Padding(1, 2)
 
 	s.BootTitle = lipgloss.NewStyle().
-		Foreground(t.Accent).
-		Background(t.Surface).
+		Foreground(lipgloss.Color(t.Accent)).
+		Background(lipgloss.Color(t.Surface)).
 		Bold(true)
 
 	s.BootTagline = lipgloss.NewStyle().
-		Foreground(t.TextMuted).
-		Background(t.Surface)
+		Foreground(lipgloss.Color(t.TextMuted)).
+		Background(lipgloss.Color(t.Surface))
 
 	s.BootRule = lipgloss.NewStyle().
-		Foreground(t.Border).
-		Background(t.Surface)
+		Foreground(lipgloss.Color(t.Border)).
+		Background(lipgloss.Color(t.Surface))
 
 	s.BootLabel = lipgloss.NewStyle().
-		Foreground(t.TextFaint).
-		Background(t.Surface)
+		Foreground(lipgloss.Color(t.TextFaint)).
+		Background(lipgloss.Color(t.Surface))
 
 	s.BootValue = lipgloss.NewStyle().
-		Foreground(t.Text).
-		Background(t.Surface).
+		Foreground(lipgloss.Color(t.Text)).
+		Background(lipgloss.Color(t.Surface)).
 		Bold(true)
 
 	// Background(Surface), not Background: Theme's own doc comment already
@@ -370,85 +370,85 @@ func New(t Theme) Styles {
 	// different background underneath.
 	s.InputBar = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(t.Border).
-		BorderBackground(t.Background).
-		Background(t.Surface).
+		BorderForeground(lipgloss.Color(t.Border)).
+		BorderBackground(lipgloss.Color(t.Background)).
+		Background(lipgloss.Color(t.Surface)).
 		Padding(0, 1)
 
 	s.InputBarFocused = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(t.BorderFocus).
-		BorderBackground(t.Background).
-		Background(t.Surface).
+		BorderForeground(lipgloss.Color(t.BorderFocus)).
+		BorderBackground(lipgloss.Color(t.Background)).
+		Background(lipgloss.Color(t.Surface)).
 		Padding(0, 1)
 
 	s.InputPrompt = lipgloss.NewStyle().
-		Background(t.Surface).
-		Foreground(t.Accent).
+		Background(lipgloss.Color(t.Surface)).
+		Foreground(lipgloss.Color(t.Accent)).
 		Bold(true)
 
 	s.InputHint = lipgloss.NewStyle().
-		Background(t.Surface).
-		Foreground(t.TextFaint)
+		Background(lipgloss.Color(t.Surface)).
+		Foreground(lipgloss.Color(t.TextFaint))
 
 	s.PaletteBorder = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(t.BorderFocus).
-		BorderBackground(t.Background).
-		Background(t.Surface).
+		BorderForeground(lipgloss.Color(t.BorderFocus)).
+		BorderBackground(lipgloss.Color(t.Background)).
+		Background(lipgloss.Color(t.Surface)).
 		Padding(1, 2)
 
 	s.PaletteTitle = lipgloss.NewStyle().
-		Foreground(t.Accent).
-		Background(t.Surface).
+		Foreground(lipgloss.Color(t.Accent)).
+		Background(lipgloss.Color(t.Surface)).
 		Bold(true)
 
 	s.PaletteItem = lipgloss.NewStyle().
-		Foreground(t.Text).
-		Background(t.Surface)
+		Foreground(lipgloss.Color(t.Text)).
+		Background(lipgloss.Color(t.Surface))
 
 	s.PaletteSelected = lipgloss.NewStyle().
-		Foreground(t.TextOnFill).
-		Background(t.Accent).
+		Foreground(lipgloss.Color(t.TextOnFill)).
+		Background(lipgloss.Color(t.Accent)).
 		Bold(true)
 
 	s.PaletteDesc = lipgloss.NewStyle().
-		Foreground(t.TextFaint).
-		Background(t.Surface)
+		Foreground(lipgloss.Color(t.TextFaint)).
+		Background(lipgloss.Color(t.Surface))
 
 	s.PaletteSelectedDesc = lipgloss.NewStyle().
-		Foreground(t.TextOnFill).
-		Background(t.Accent)
+		Foreground(lipgloss.Color(t.TextOnFill)).
+		Background(lipgloss.Color(t.Accent))
 
 	s.Suggestions = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(t.Border).
-		BorderBackground(t.Background).
-		Background(t.Surface).
+		BorderForeground(lipgloss.Color(t.Border)).
+		BorderBackground(lipgloss.Color(t.Background)).
+		Background(lipgloss.Color(t.Surface)).
 		Padding(0, 1)
 
 	s.SuggestionItem = lipgloss.NewStyle().
-		Foreground(t.Accent).
-		Background(t.Surface).
+		Foreground(lipgloss.Color(t.Accent)).
+		Background(lipgloss.Color(t.Surface)).
 		Bold(true)
 
 	s.SuggestionSelected = lipgloss.NewStyle().
-		Foreground(t.TextOnFill).
-		Background(t.Accent).
+		Foreground(lipgloss.Color(t.TextOnFill)).
+		Background(lipgloss.Color(t.Accent)).
 		Bold(true)
 
 	s.SuggestionDesc = lipgloss.NewStyle().
-		Foreground(t.TextFaint).
-		Background(t.Surface)
+		Foreground(lipgloss.Color(t.TextFaint)).
+		Background(lipgloss.Color(t.Surface))
 
 	s.SuggestionSelectedDesc = lipgloss.NewStyle().
-		Foreground(t.TextOnFill).
-		Background(t.Accent)
+		Foreground(lipgloss.Color(t.TextOnFill)).
+		Background(lipgloss.Color(t.Accent))
 
 	s.HelpBadge = func(active bool) HelpBadgeStyle {
-		bg, keyFg, descFg := t.Surface, t.TextFaint, t.TextMuted
+		bg, keyFg, descFg := lipgloss.Color(t.Surface), lipgloss.Color(t.TextFaint), lipgloss.Color(t.TextMuted)
 		if active {
-			bg, keyFg, descFg = t.Attention, t.TextOnFill, t.TextOnFill
+			bg, keyFg, descFg = lipgloss.Color(t.Attention), lipgloss.Color(t.TextOnFill), lipgloss.Color(t.TextOnFill)
 		}
 		keyStyle := lipgloss.NewStyle().Background(bg).Foreground(keyFg).Padding(0, 0, 0, 1)
 		descStyle := lipgloss.NewStyle().Background(bg).Foreground(descFg).Padding(0, 1, 0, 0)

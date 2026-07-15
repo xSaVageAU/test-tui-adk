@@ -6,7 +6,7 @@ import (
 
 	"tui-testing/internal/theme"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 // bootMaxWidth caps the banner's width on a roomy terminal — it's meant
@@ -66,7 +66,8 @@ func renderBootArt(s theme.Styles, info BootInfo, width int) string {
 	// App.viewport, so viewport.Style's own per-line repaint (see
 	// App.layout/applyTheme) never gets a chance to add that padding
 	// itself.
-	return lipgloss.PlaceHorizontal(width, lipgloss.Center, box, lipgloss.WithWhitespaceBackground(s.Theme.Background))
+	whitespace := lipgloss.NewStyle().Background(lipgloss.Color(s.Theme.Background))
+	return lipgloss.PlaceHorizontal(width, lipgloss.Center, box, lipgloss.WithWhitespaceStyle(whitespace))
 }
 
 // bootRow renders one "label   value" line, the label at its natural

@@ -6,10 +6,10 @@ import (
 
 	"tui-testing/internal/theme"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // textPopupKind distinguishes what paletteTextInput's Enter should do —
@@ -69,9 +69,13 @@ func (a *App) openKeyInput(provider string) {
 	ti.EchoMode = textinput.EchoPassword
 	ti.EchoCharacter = '•'
 	ti.CharLimit = 256
-	ti.Width = a.textPopupWidth() - 4
-	ti.PromptStyle = a.styles.InputPrompt
-	ti.PlaceholderStyle = a.styles.InputHint
+	ti.SetWidth(a.textPopupWidth() - 4)
+	styles := ti.Styles()
+	styles.Focused.Prompt = a.styles.InputPrompt
+	styles.Focused.Placeholder = a.styles.InputHint
+	styles.Blurred.Prompt = a.styles.InputPrompt
+	styles.Blurred.Placeholder = a.styles.InputHint
+	ti.SetStyles(styles)
 	ti.Focus()
 
 	a.keyInput = ti
@@ -98,7 +102,7 @@ func providerDisplayName(provider string) string {
 // handleTextInputKey runs while paletteTextInput has focus: Esc cancels,
 // Enter submits (routed by textPopupKind to whichever field this popup
 // is currently backing), everything else edits the field.
-func (a *App) handleTextInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (a *App) handleTextInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Escape):
 		a.cancelMenu()
@@ -168,7 +172,7 @@ func renderTextInputOverlay(bg string, s theme.Styles, title string, ti textinpu
 	// reading it back here rather than recomputing keeps a single source
 	// of truth for the popup's outer width instead of two formulas that
 	// could drift apart.
-	boxWidth := ti.Width + 4
+	boxWidth := ti.Width() + 4
 
 	titleRow := renderPaletteTitle(s, title, boxWidth)
 	field := s.InputBarFocused.Width(boxWidth - 2).Render(ti.View())

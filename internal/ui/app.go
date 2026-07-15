@@ -12,14 +12,14 @@ import (
 	"tui-testing/internal/settings"
 	"tui-testing/internal/theme"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/stopwatch"
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/stopwatch"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // layout constants: the top bar (agent/status/session meta line + rule) is
@@ -272,7 +272,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.ready = true
 		return a, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return a.handleKey(msg)
 
 	case workingAnimTickMsg:
@@ -444,7 +444,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return a, tea.Batch(cmds...)
 }
 
-func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (a *App) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Quit):
 		return a, tea.Quit
@@ -494,7 +494,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // arrow keys move the highlight, Enter runs the highlighted command, Esc
 // clears the input to dismiss it, and anything else (more typing,
 // backspace, ...) still reaches the textarea so the query keeps narrowing.
-func (a *App) handleSuggestKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (a *App) handleSuggestKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Up):
 		a.suggestIndex = max(a.suggestIndex-1, 0)
@@ -523,7 +523,7 @@ func (a *App) handleSuggestKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return a, cmd
 }
 
-func (a *App) handlePaletteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (a *App) handlePaletteKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Escape):
 		a.cancelMenu()
@@ -720,7 +720,7 @@ func (a *App) startReasoning() tea.Cmd {
 	}
 	a.reasoning = true
 	a.reasoningStart = time.Now()
-	a.stopwatch = stopwatch.NewWithInterval(reasoningTickInterval)
+	a.stopwatch = stopwatch.New(stopwatch.WithInterval(reasoningTickInterval))
 	if a.streamingMsgIndex < len(a.messages) {
 		a.messages[a.streamingMsgIndex].ReasoningActive = true
 		a.messages[a.streamingMsgIndex].ReasoningDuration = 0
@@ -886,7 +886,7 @@ func (a *App) applyTheme() {
 // keystroke, resize, and cursor blink, so it has to leave scrolling
 // alone; see followTranscript for the variant that's allowed to move it.
 func (a *App) refreshTranscript() {
-	content, userMsgLines := renderTranscript(a.styles, a.bootInfo, a.messages, a.viewport.Width, a.highlightUser, a.verboseTools, a.showReasoning)
+	content, userMsgLines := renderTranscript(a.styles, a.bootInfo, a.messages, a.viewport.Width(), a.highlightUser, a.verboseTools, a.showReasoning)
 	a.viewport.SetContent(content)
 	a.userMsgLines = userMsgLines
 }
@@ -918,10 +918,10 @@ func (a *App) stickyPromptOverlay() string {
 	if n == 0 || a.lastPromptText == "" {
 		return ""
 	}
-	if a.viewport.YOffset <= a.userMsgLines[n-1] {
+	if a.viewport.YOffset() <= a.userMsgLines[n-1] {
 		return ""
 	}
-	return renderStickyPrompt(a.styles, a.lastPromptText, a.viewport.Width)
+	return renderStickyPrompt(a.styles, a.lastPromptText, a.viewport.Width())
 }
 
 // jumpToPrevPrompt / jumpToNextPrompt back PgUp/PgDn: rather than
@@ -932,7 +932,7 @@ func (a *App) stickyPromptOverlay() string {
 // bottom has nothing past the last one.
 func (a *App) jumpToPrevPrompt() {
 	for i := len(a.userMsgLines) - 1; i >= 0; i-- {
-		if a.userMsgLines[i] < a.viewport.YOffset {
+		if a.userMsgLines[i] < a.viewport.YOffset() {
 			a.viewport.SetYOffset(a.userMsgLines[i])
 			return
 		}
@@ -942,7 +942,7 @@ func (a *App) jumpToPrevPrompt() {
 
 func (a *App) jumpToNextPrompt() {
 	for _, line := range a.userMsgLines {
-		if line > a.viewport.YOffset {
+		if line > a.viewport.YOffset() {
 			a.viewport.SetYOffset(line)
 			return
 		}
@@ -977,18 +977,18 @@ func (a *App) layout() {
 	}
 	vpHeight := max(a.height-topBarHeight-workingAnimHeight-suggestHeight-inputBoxHeight-footerHeight, 0)
 
-	if a.viewport.Width == 0 {
-		a.viewport = viewport.New(a.width, vpHeight)
+	if a.viewport.Width() == 0 {
+		a.viewport = viewport.New(viewport.WithWidth(a.width), viewport.WithHeight(vpHeight))
 		a.viewport.MouseWheelDelta = 2 // a bit faster than 1, still finer than the 3-line default
 		a.viewport.Style = a.styles.Viewport
 	} else {
-		a.viewport.Width = a.width
-		a.viewport.Height = vpHeight
+		a.viewport.SetWidth(a.width)
+		a.viewport.SetHeight(vpHeight)
 	}
 
 	switch a.paletteKind {
 	case paletteTextInput:
-		a.keyInput.Width = a.textPopupWidth() - 4
+		a.keyInput.SetWidth(a.textPopupWidth() - 4)
 	case paletteNone:
 		// nothing to resize
 	default:
@@ -1001,15 +1001,15 @@ func (a *App) layout() {
 func (a *App) paletteWidth() int  { return min(a.width-8, 50) }
 func (a *App) paletteHeight() int { return min(a.height-8, 12) }
 
-func (a *App) View() string {
+func (a *App) View() tea.View {
 	if !a.ready {
-		return ""
+		return tea.NewView("")
 	}
 
 	topBar := renderTopBar(a.styles, a.width, a.sessionID, a.contextUsed, a.contextWindow)
 	body := a.viewport.View()
 	if sticky := a.stickyPromptOverlay(); sticky != "" {
-		body = overlay(body, sticky, 0, 0, a.viewport.Width)
+		body = overlay(body, sticky, 0, 0, a.viewport.Width())
 	}
 	workingAnimBlock := blankWorkingAnim(a.styles.Theme, a.width)
 	if a.workingAnimShouldRun() {
@@ -1031,10 +1031,24 @@ func (a *App) View() string {
 	// against the real screen behind it.
 	switch a.paletteKind {
 	case paletteTextInput:
-		return renderTextInputOverlay(frame, a.styles, a.textPopupLabel, a.keyInput, a.width, a.height)
+		frame = renderTextInputOverlay(frame, a.styles, a.textPopupLabel, a.keyInput, a.width, a.height)
 	case paletteNone:
-		return frame
+		// frame already holds the whole screen; nothing more to composite.
 	default:
-		return renderPaletteOverlay(frame, a.styles, a.paletteTitle, a.paletteList, a.width, a.height)
+		frame = renderPaletteOverlay(frame, a.styles, a.paletteTitle, a.paletteList, a.width, a.height)
 	}
+
+	v := tea.NewView(frame)
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	// The actual fix for this whole app's background-color problem: a
+	// one-time OSC background-color escape the terminal itself then
+	// treats as its default, so anything that resolves to "no explicit
+	// color" (JoinVertical's own unstyled line-padding, textarea's
+	// private internal viewport, ...) shows the theme's background
+	// instead of the terminal's raw one. See the migration plan for the
+	// full trace of why this needed a framework change rather than more
+	// manual Background() patching.
+	v.BackgroundColor = lipgloss.Color(a.styles.Theme.Background)
+	return v
 }

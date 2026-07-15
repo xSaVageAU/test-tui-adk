@@ -6,9 +6,10 @@ import (
 
 	"tui-testing/internal/theme"
 
-	"github.com/charmbracelet/bubbles/list"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // paletteKind identifies which slash command opened the popup, so
@@ -74,7 +75,16 @@ func (d paletteDelegate) Render(w io.Writer, m list.Model, index int, listItem l
 	}
 
 	left := titleStyle.Render(" " + item.title)
-	fmt.Fprint(w, left+descStyle.Width(max(width-lipgloss.Width(left), 0)).Render("  "+item.desc))
+	descWidth := max(width-lipgloss.Width(left), 0)
+	// Truncate rather than let Width() below word-wrap: this delegate
+	// declares Height() == 1, a contract list.Model takes at face value —
+	// a long desc (e.g. an OpenRouter model slug) wrapping into a second
+	// physical line list.Model never budgeted for left that line's tail
+	// without a background, the same class of gap as everywhere else in
+	// this app that something wrapped outside of what a style's own
+	// Width() call was accounting for.
+	desc := ansi.Truncate("  "+item.desc, descWidth, "…")
+	fmt.Fprint(w, left+descStyle.Width(descWidth).Render(desc))
 }
 
 // paletteTitleHeight is how many rows renderPaletteTitle's output takes

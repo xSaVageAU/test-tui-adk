@@ -6,7 +6,7 @@ import (
 
 	"tui-testing/internal/theme"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 // renderTopBar draws the fixed two-line panel pinned to the top of the

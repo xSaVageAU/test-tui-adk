@@ -7,7 +7,7 @@ import (
 
 	"tui-testing/internal/theme"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // turnInProgress reports whether a turn is actively streaming or paused

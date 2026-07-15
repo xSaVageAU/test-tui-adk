@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"tui-testing/internal/theme"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestHumanCount(t *testing.T) {
@@ -60,7 +62,12 @@ func TestJoinLeftRight(t *testing.T) {
 		t.Errorf("empty right: got %q, want %q", got, "left")
 	}
 
-	got := joinLeftRight(s, "left", "right", 11)
+	// The gap between left and right is rendered through a style (see
+	// joinLeftRight's own doc comment on why), so — unlike v1, which
+	// stripped all color in a non-TTY test run — lipgloss v2 leaves real
+	// ANSI codes in the output even here; strip them to check the actual
+	// spacing/content this test cares about.
+	got := ansi.Strip(joinLeftRight(s, "left", "right", 11))
 	if got != "left  right" {
 		t.Errorf("got %q, want %q", got, "left  right")
 	}

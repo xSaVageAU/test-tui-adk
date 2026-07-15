@@ -8,7 +8,7 @@ import (
 
 	"tui-testing/internal/theme"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -77,8 +77,8 @@ func renderTranscript(s theme.Styles, boot BootInfo, messages []ChatMessage, wid
 // same underlying issue in miniature (there, fixed by giving each
 // concatenated fragment its own background instead, since those gaps
 // are mid-line, not trailing).
-func padLinesBackground(bg lipgloss.Color, content string, width int) string {
-	style := lipgloss.NewStyle().Background(bg)
+func padLinesBackground(bg string, content string, width int) string {
+	style := lipgloss.NewStyle().Background(lipgloss.Color(bg))
 	lines := strings.Split(content, "\n")
 	for i, line := range lines {
 		lines[i] = style.Width(width).Render(line)

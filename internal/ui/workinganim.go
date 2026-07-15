@@ -9,8 +9,8 @@ import (
 
 	"tui-testing/internal/theme"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // workingAnimHeight is the fixed number of rows reserved above the input
@@ -146,7 +146,7 @@ func (w *workingAnimState) render(t theme.Theme, width int, label string) string
 // visible as the "reserved area" looking black while an animation
 // played even though the glyphs themselves were the right color.
 func bgStyle(t theme.Theme) lipgloss.Style {
-	return lipgloss.NewStyle().Background(t.Background)
+	return lipgloss.NewStyle().Background(lipgloss.Color(t.Background))
 }
 
 // blankAnimLine is one width-wide, background-painted but otherwise
@@ -155,7 +155,7 @@ func bgStyle(t theme.Theme) lipgloss.Style {
 // while idle). A bare "" here would leave the terminal's raw default
 // background showing through instead of the theme's.
 func blankAnimLine(t theme.Theme, width int) string {
-	return lipgloss.NewStyle().Background(t.Background).Width(width).Render("")
+	return lipgloss.NewStyle().Background(lipgloss.Color(t.Background)).Width(width).Render("")
 }
 
 // blankWorkingAnim is what occupies the reserved rows while nothing is
@@ -208,13 +208,18 @@ func (a *App) workingAnimShouldRun() bool {
 // shared color helpers
 // ─────────────────────────────────────────────
 
-func lerpColor(a, b lipgloss.Color, t float64) lipgloss.Color {
-	ar, ag, ab := hexToRGB(string(a))
-	br, bg, bb := hexToRGB(string(b))
+// lerpColor and hexToRGB operate on plain hex strings, not lipgloss.Color
+// — matching theme.Theme's own fields (plain strings; see theme.go's doc
+// comment on why lipgloss v2 can no longer be used as a struct field
+// type). Callers wrap the result with lipgloss.Color(...) at the point
+// they hand it to a Style's Foreground/Background.
+func lerpColor(a, b string, t float64) string {
+	ar, ag, ab := hexToRGB(a)
+	br, bg, bb := hexToRGB(b)
 	r := int(float64(ar) + t*(float64(br)-float64(ar)))
 	g := int(float64(ag) + t*(float64(bg)-float64(ag)))
 	b2 := int(float64(ab) + t*(float64(bb)-float64(ab)))
-	return lipgloss.Color(fmt.Sprintf("#%02X%02X%02X", r, g, b2))
+	return fmt.Sprintf("#%02X%02X%02X", r, g, b2)
 }
 
 func hexToRGB(h string) (int, int, int) {
@@ -252,7 +257,7 @@ func (w *workingAnimState) renderPulseWave(t theme.Theme, width int) string {
 		if v > 0.85 {
 			col = lerpColor(t.Warning, t.Text, (v-0.85)/0.15)
 		}
-		line.WriteString(bgStyle(t).Foreground(col).Render(string(chars[idx])))
+		line.WriteString(bgStyle(t).Foreground(lipgloss.Color(col)).Render(string(chars[idx])))
 	}
 
 	return line.String()
@@ -277,7 +282,7 @@ func (w *workingAnimState) renderOrbit(t theme.Theme, width int, label string) s
 
 	cells := make([]struct {
 		ch  rune
-		col lipgloss.Color
+		col string
 	}, width)
 	for i := range cells {
 		cells[i].ch = ' '
@@ -285,7 +290,7 @@ func (w *workingAnimState) renderOrbit(t theme.Theme, width int, label string) s
 
 	type orbitDot struct {
 		angle      float64
-		colA, colB lipgloss.Color
+		colA, colB string
 	}
 	dots := []orbitDot{
 		{frameVal, t.Accent, t.AccentMuted},
@@ -303,8 +308,8 @@ func (w *workingAnimState) renderOrbit(t theme.Theme, width int, label string) s
 			fade := 1.0 - float64(ti)/float64(trailLen)
 			col := lerpColor(dot.colB, dot.colA, fade)
 			if ti > 0 {
-				rr, g, b := hexToRGB(string(col))
-				col = lipgloss.Color(fmt.Sprintf("#%02X%02X%02X", int(float64(rr)*fade), int(float64(g)*fade), int(float64(b)*fade)))
+				rr, g, b := hexToRGB(col)
+				col = fmt.Sprintf("#%02X%02X%02X", int(float64(rr)*fade), int(float64(g)*fade), int(float64(b)*fade))
 			}
 			ch := '●'
 			if ti > 0 {
@@ -328,14 +333,14 @@ func (w *workingAnimState) renderOrbit(t theme.Theme, width int, label string) s
 
 	var sb strings.Builder
 	for _, c := range cells {
-		sb.WriteString(bgStyle(t).Foreground(c.col).Render(string(c.ch)))
+		sb.WriteString(bgStyle(t).Foreground(lipgloss.Color(c.col)).Render(string(c.ch)))
 	}
 
 	pulse := float64(w.frame) * 0.08
 	var sb2 strings.Builder
 	for i := 0; i < width; i++ {
 		v := (math.Sin(float64(i)/float64(width)*math.Pi*4-pulse) + 1) / 2 * 0.5
-		sb2.WriteString(bgStyle(t).Foreground(lerpColor(t.Surface, t.AccentMuted, v)).Render("▄"))
+		sb2.WriteString(bgStyle(t).Foreground(lipgloss.Color(lerpColor(t.Surface, t.AccentMuted, v))).Render("▄"))
 	}
 
 	return sb.String() + "\n" + sb2.String()
@@ -378,7 +383,7 @@ func (w *workingAnimState) renderGlitchScan(t theme.Theme, width int) string {
 		inScan := dist >= 0 && dist < scanWidth && i < msgLen
 
 		var ch rune
-		var col lipgloss.Color
+		var col string
 		bold := false
 
 		switch {
@@ -402,7 +407,7 @@ func (w *workingAnimState) renderGlitchScan(t theme.Theme, width int) string {
 			ch = ' '
 		}
 
-		st := bgStyle(t).Foreground(col)
+		st := bgStyle(t).Foreground(lipgloss.Color(col))
 		if bold {
 			st = st.Bold(true)
 		}
@@ -421,9 +426,9 @@ func (w *workingAnimState) renderGlitchScan(t theme.Theme, width int) string {
 	var sb2 strings.Builder
 	for i := 0; i < width; i++ {
 		if i < filled {
-			sb2.WriteString(bgStyle(t).Foreground(lerpColor(t.AccentMuted, t.Accent, float64(i)/float64(width))).Render("▬"))
+			sb2.WriteString(bgStyle(t).Foreground(lipgloss.Color(lerpColor(t.AccentMuted, t.Accent, float64(i)/float64(width)))).Render("▬"))
 		} else {
-			sb2.WriteString(bgStyle(t).Foreground(t.Highlight).Render("─"))
+			sb2.WriteString(bgStyle(t).Foreground(lipgloss.Color(t.Highlight)).Render("─"))
 		}
 	}
 
@@ -461,9 +466,9 @@ func (w *workingAnimState) renderCylonScanner(t theme.Theme, width int) string {
 			default:
 				ch = "░"
 			}
-			sb.WriteString(bgStyle(t).Foreground(col).Render(ch))
+			sb.WriteString(bgStyle(t).Foreground(lipgloss.Color(col)).Render(ch))
 		} else {
-			sb.WriteString(bgStyle(t).Foreground(t.Highlight).Render("─"))
+			sb.WriteString(bgStyle(t).Foreground(lipgloss.Color(t.Highlight)).Render("─"))
 		}
 	}
 	return sb.String()
@@ -492,7 +497,7 @@ func (w *workingAnimState) renderBouncingDots(t theme.Theme, width int) string {
 		val := (math.Sin(float64(w.frame)*0.25-float64(j)*0.7) + 1.0) / 2.0
 
 		var ch string
-		var col lipgloss.Color
+		var col string
 		switch {
 		case val > 0.8:
 			ch, col = "●", t.Accent
@@ -503,14 +508,14 @@ func (w *workingAnimState) renderBouncingDots(t theme.Theme, width int) string {
 		default:
 			ch, col = " ", t.Surface
 		}
-		cells[pos] = bgStyle(t).Foreground(col).Render(ch)
+		cells[pos] = bgStyle(t).Foreground(lipgloss.Color(col)).Render(ch)
 	}
 
 	var sb strings.Builder
 	for _, c := range cells {
 		sb.WriteString(c)
 	}
-	label := bgStyle(t).Foreground(t.TextMuted).Render(" aligning thoughts ")
+	label := bgStyle(t).Foreground(lipgloss.Color(t.TextMuted)).Render(" aligning thoughts ")
 	return sb.String() + "\n" + label
 }
 
@@ -531,7 +536,7 @@ func (w *workingAnimState) renderEqualizer(t theme.Theme, width int) string {
 		v := (math.Sin(float64(i)*0.15+phase) + math.Sin(float64(i)*0.37-phase*0.7) + 2.0) / 4.0
 		idx := int(v * float64(len(runes)-1))
 		col := lerpColor(t.Accent, t.Warning, float64(i)/float64(width))
-		row.WriteString(bgStyle(t).Foreground(col).Render(string(runes[idx])))
+		row.WriteString(bgStyle(t).Foreground(lipgloss.Color(col)).Render(string(runes[idx])))
 	}
 	return row.String()
 }
@@ -551,7 +556,7 @@ func (w *workingAnimState) renderMatrixRain(t theme.Theme, width int) string {
 		for r := 0; r < 2; r++ {
 			dist := y - float64(r)
 			var ch rune
-			var col lipgloss.Color
+			var col string
 			bold := false
 
 			if dist >= 0 && dist < 3.0 {
@@ -567,7 +572,7 @@ func (w *workingAnimState) renderMatrixRain(t theme.Theme, width int) string {
 				ch = ' '
 			}
 
-			st := bgStyle(t).Foreground(col)
+			st := bgStyle(t).Foreground(lipgloss.Color(col))
 			if bold {
 				st = st.Bold(true)
 			}
@@ -599,8 +604,8 @@ func (w *workingAnimState) renderBrailleWave(t theme.Theme, width int) string {
 		idx1 := int(v1 * float64(len(brailleRunes)-1))
 		idx2 := int(v2 * float64(len(brailleRunes)-1))
 
-		line1.WriteString(bgStyle(t).Foreground(lerpColor(t.Surface, t.Accent, v1)).Render(string(brailleRunes[idx1])))
-		line2.WriteString(bgStyle(t).Foreground(lerpColor(t.Surface, t.AccentMuted, v2)).Render(string(brailleRunes[idx2])))
+		line1.WriteString(bgStyle(t).Foreground(lipgloss.Color(lerpColor(t.Surface, t.Accent, v1))).Render(string(brailleRunes[idx1])))
+		line2.WriteString(bgStyle(t).Foreground(lipgloss.Color(lerpColor(t.Surface, t.AccentMuted, v2))).Render(string(brailleRunes[idx2])))
 	}
 	return line1.String() + "\n" + line2.String()
 }
@@ -627,12 +632,12 @@ func (w *workingAnimState) renderRadarSweep(t theme.Theme, width int) string {
 		}
 		switch {
 		case d == 0:
-			sb.WriteString(bgStyle(t).Bold(true).Foreground(t.Text).Render("▐"))
+			sb.WriteString(bgStyle(t).Bold(true).Foreground(lipgloss.Color(t.Text)).Render("▐"))
 		case d < trailLen:
 			fade := 1 - float64(d)/float64(trailLen)
-			sb.WriteString(bgStyle(t).Foreground(lerpColor(t.Surface, t.Accent, fade)).Render("·"))
+			sb.WriteString(bgStyle(t).Foreground(lipgloss.Color(lerpColor(t.Surface, t.Accent, fade))).Render("·"))
 		default:
-			sb.WriteString(bgStyle(t).Foreground(t.Highlight).Render("─"))
+			sb.WriteString(bgStyle(t).Foreground(lipgloss.Color(t.Highlight)).Render("─"))
 		}
 	}
 	return sb.String()
@@ -659,13 +664,13 @@ func (w *workingAnimState) renderSlashTrail(t theme.Theme, width int) string {
 		col := lerpColor(t.AccentMuted, t.Accent, (math.Sin(float64(i)*0.3+float64(w.frame)*0.05)+1)/2)
 
 		if (i+offset)%slashTrailPeriod == 0 {
-			top.WriteString(bgStyle(t).Foreground(col).Render("/"))
+			top.WriteString(bgStyle(t).Foreground(lipgloss.Color(col)).Render("/"))
 		} else {
 			top.WriteString(blank)
 		}
 
 		if (i+1+offset)%slashTrailPeriod == 0 {
-			bottom.WriteString(bgStyle(t).Foreground(col).Render("/"))
+			bottom.WriteString(bgStyle(t).Foreground(lipgloss.Color(col)).Render("/"))
 		} else {
 			bottom.WriteString(blank)
 		}

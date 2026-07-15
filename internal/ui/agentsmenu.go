@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 )
 
 // rootAgentMenuID is the paletteItem id standing in for AgentConfigSummary's
@@ -101,9 +101,13 @@ func (a *App) openAgentModelInput() {
 	ti := textinput.New()
 	ti.Placeholder = modelPlaceholderFor(ag.Provider)
 	ti.CharLimit = 256
-	ti.Width = a.textPopupWidth() - 4
-	ti.PromptStyle = a.styles.InputPrompt
-	ti.PlaceholderStyle = a.styles.InputHint
+	ti.SetWidth(a.textPopupWidth() - 4)
+	styles := ti.Styles()
+	styles.Focused.Prompt = a.styles.InputPrompt
+	styles.Focused.Placeholder = a.styles.InputHint
+	styles.Blurred.Prompt = a.styles.InputPrompt
+	styles.Blurred.Placeholder = a.styles.InputHint
+	ti.SetStyles(styles)
 	ti.SetValue(ag.Model)
 	ti.CursorEnd()
 	ti.Focus()

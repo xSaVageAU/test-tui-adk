@@ -9,8 +9,6 @@ import (
 	"strings"
 
 	"tui-testing/internal/appdir"
-
-	"github.com/charmbracelet/lipgloss"
 )
 
 // defaultsFS embeds the built-in theme configs at build time — see
@@ -128,7 +126,7 @@ func (t Theme) validate() error {
 	}
 	fields := []struct {
 		key   string
-		value lipgloss.Color
+		value string
 	}{
 		{"background", t.Background},
 		{"surface", t.Surface},

@@ -5,8 +5,8 @@ import (
 
 	"tui-testing/internal/theme"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/lipgloss/v2"
 )
 
 // The input box starts at one line tall and grows as wrapped text needs
@@ -52,16 +52,15 @@ func wrappedLines(ta textarea.Model) int {
 // different background sitting inside it. No line-highlight band on
 // CursorLine; this isn't a code editor.
 func applyInputStyles(ta *textarea.Model, s theme.Styles) {
-	surface := lipgloss.NewStyle().Background(s.Theme.Surface)
-	style := textarea.Style{
+	surface := lipgloss.NewStyle().Background(lipgloss.Color(s.Theme.Surface))
+	state := textarea.StyleState{
 		Base:        surface,
 		CursorLine:  surface,
 		Placeholder: s.InputHint,
 		Prompt:      s.InputPrompt,
-		Text:        surface.Foreground(s.Theme.Text),
+		Text:        surface.Foreground(lipgloss.Color(s.Theme.Text)),
 	}
-	ta.FocusedStyle = style
-	ta.BlurredStyle = style
+	ta.SetStyles(textarea.Styles{Focused: state, Blurred: state})
 }
 
 // renderInputBar wraps the textarea in the themed border box, focused or

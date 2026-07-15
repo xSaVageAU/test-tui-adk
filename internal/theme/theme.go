@@ -10,44 +10,48 @@
 // runtime — same shape, just read from disk instead of go:embed.
 package theme
 
-import "github.com/charmbracelet/lipgloss"
-
 // Theme is a palette of semantic color tokens. Keep it to roles ("what is
 // this color for"), not specific widgets ("what color is the header") —
 // that mapping lives in Styles. json tags are what both the embedded
 // defaults and a user's custom theme files are parsed against — see
 // load.go.
+//
+// Every field is a plain string (a hex color code), not lipgloss.Color:
+// in lipgloss v2, Color is a constructor function, not a type, so it
+// can't be used as a struct field and json.Unmarshal has no way to
+// populate it directly. Callers wrap a field with lipgloss.Color(t.X)
+// at the point of use (see styles.go) instead.
 type Theme struct {
 	Name string `json:"name"`
 
 	// Surfaces
-	Background lipgloss.Color `json:"background"`
-	Surface    lipgloss.Color `json:"surface"`   // slightly raised panels (input bar, palette)
-	Highlight  lipgloss.Color `json:"highlight"` // backdrop tint for callout blocks (e.g. a highlighted message)
+	Background string `json:"background"`
+	Surface    string `json:"surface"`   // slightly raised panels (input bar, palette)
+	Highlight  string `json:"highlight"` // backdrop tint for callout blocks (e.g. a highlighted message)
 
 	// Borders
-	Border      lipgloss.Color `json:"border"`
-	BorderFocus lipgloss.Color `json:"borderFocus"`
+	Border      string `json:"border"`
+	BorderFocus string `json:"borderFocus"`
 
 	// Text
-	Text       lipgloss.Color `json:"text"`
-	TextMuted  lipgloss.Color `json:"textMuted"`
-	TextFaint  lipgloss.Color `json:"textFaint"`
-	TextOnFill lipgloss.Color `json:"textOnFill"` // text drawn on top of an Accent-filled background
+	Text       string `json:"text"`
+	TextMuted  string `json:"textMuted"`
+	TextFaint  string `json:"textFaint"`
+	TextOnFill string `json:"textOnFill"` // text drawn on top of an Accent-filled background
 
 	// Brand / accent
-	Accent      lipgloss.Color `json:"accent"`
-	AccentMuted lipgloss.Color `json:"accentMuted"`
+	Accent      string `json:"accent"`
+	AccentMuted string `json:"accentMuted"`
 	// Reasoning is the model's "thinking" badge (see Styles.ReasoningBadge)
 	// — split out from Accent so a theme can give that indicator its own
 	// hue instead of it always matching every other branded/interactive
 	// element in the app.
-	Reasoning lipgloss.Color `json:"reasoning"`
+	Reasoning string `json:"reasoning"`
 
 	// Status
-	Success lipgloss.Color `json:"success"`
-	Warning lipgloss.Color `json:"warning"`
-	Error   lipgloss.Color `json:"error"`
+	Success string `json:"success"`
+	Warning string `json:"warning"`
+	Error   string `json:"error"`
 
 	// Attention marks tool activity and an active toggle (see
 	// Styles.ToolCallName/ToolConfirmPending/HelpBadge) — "something
@@ -57,5 +61,5 @@ type Theme struct {
 	// separate one per widget so all of that chrome moves together —
 	// tool badges and active-toggle badges were always meant to read as
 	// the same family of indicator.
-	Attention lipgloss.Color `json:"attention"`
+	Attention string `json:"attention"`
 }

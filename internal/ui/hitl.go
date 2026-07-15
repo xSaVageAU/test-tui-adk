@@ -6,8 +6,8 @@ import (
 
 	"tui-testing/internal/theme"
 
-	"github.com/charmbracelet/bubbles/key"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 )
 
 // hitlMode picks how a pending tool-approval request is presented — both
@@ -118,7 +118,7 @@ func (a *App) openConfirmModal() {
 // Distinct from handlePaletteKey because Escape here needs to resolve the
 // confirmation (as a denial) rather than just close the menu, which means
 // it — unlike every other popup's Escape — has to return a tea.Cmd.
-func (a *App) handleConfirmModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (a *App) handleConfirmModalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Escape):
 		return a, a.resolveConfirmation(false)
@@ -143,7 +143,7 @@ func (a *App) handleConfirmModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // switch before this is ever reached). y/n resolve it; everything else is
 // swallowed — the turn really is blocked until this resolves, so there's
 // nothing else useful for a keypress to do here.
-func (a *App) handlePendingConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (a *App) handlePendingConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y":
 		return a, a.resolveConfirmation(true)

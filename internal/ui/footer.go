@@ -5,7 +5,7 @@ import (
 
 	"tui-testing/internal/theme"
 
-	"github.com/charmbracelet/bubbles/key"
+	"charm.land/bubbles/v2/key"
 )
 
 // renderHelpFooter draws the bottom help line as one dim badge per
