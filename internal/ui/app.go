@@ -267,9 +267,26 @@ func (a *App) Init() tea.Cmd {
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		widthChanged := a.ready && msg.Width != a.width
 		a.width, a.height = msg.Width, msg.Height
-		a.layout()
-		a.ready = true
+		if !a.ready {
+			// Nothing to preserve yet — this is the very first size the
+			// program ever receives.
+			a.layout()
+			a.ready = true
+			return a, nil
+		}
+		if widthChanged {
+			a.resizeAndPreserveScroll()
+		} else {
+			// Height-only change: the transcript doesn't reflow (wrapping
+			// only depends on width), so the existing YOffset already
+			// points at exactly the same content it did before — anchoring
+			// it to a message boundary here would be actively wrong,
+			// snapping away from the user's real mid-message scroll
+			// position even though nothing needed to move.
+			a.layout()
+		}
 		return a, nil
 
 	case tea.KeyPressMsg:
@@ -957,8 +974,9 @@ func (a *App) layout() {
 	if a.width == 0 {
 		return
 	}
+	width := a.renderWidth()
 
-	a.input.SetWidth(a.width - 4) // border + padding on each side
+	a.input.SetWidth(width - 4) // border + padding on each side
 	a.inputLines = wrappedLines(a.input)
 
 	if query, active := a.commandQuery(); active {
@@ -978,11 +996,11 @@ func (a *App) layout() {
 	vpHeight := max(a.height-topBarHeight-workingAnimHeight-suggestHeight-inputBoxHeight-footerHeight, 0)
 
 	if a.viewport.Width() == 0 {
-		a.viewport = viewport.New(viewport.WithWidth(a.width), viewport.WithHeight(vpHeight))
+		a.viewport = viewport.New(viewport.WithWidth(width), viewport.WithHeight(vpHeight))
 		a.viewport.MouseWheelDelta = 2 // a bit faster than 1, still finer than the 3-line default
 		a.viewport.Style = a.styles.Viewport
 	} else {
-		a.viewport.SetWidth(a.width)
+		a.viewport.SetWidth(width)
 		a.viewport.SetHeight(vpHeight)
 	}
 
@@ -998,29 +1016,101 @@ func (a *App) layout() {
 	a.refreshTranscript()
 }
 
+// resizeAndPreserveScroll is WindowSizeMsg's handler specifically when
+// the width changed (see the widthChanged branch in Update — a
+// height-only resize skips this entirely and just calls layout()
+// directly, since nothing below applies without an actual rewrap).
+// layout()'s own refreshTranscript rewraps the whole transcript to the
+// new width, which changes how many lines the same content actually
+// takes up — a plain numeric viewport.YOffset (a raw line index)
+// doesn't survive that. viewport.SetWidth/SetContent never touch it
+// themselves (confirmed from bubbles' own source), so left alone it
+// keeps pointing at whatever line index it was, which after a rewrap is
+// usually a *different* — and on a shrink specifically, visibly earlier
+// — chunk of the conversation than what was on screen a moment ago.
+// Widening happens to mostly self-correct (fewer wrapped lines means a
+// stale offset is more likely to just clamp near the bottom, which is
+// often where you want to be anyway); narrowing has no such luck, which
+// is exactly the asymmetry reported live: smooth growing the terminal,
+// jumpy shrinking it.
+//
+// Fixed by anchoring to content instead of a line number: capture
+// whether the viewport was pinned to the bottom, or which user message
+// was at/above the top edge, *before* the rewrap, then restore the
+// equivalent position afterward using userMsgLines' new (post-rewrap)
+// line numbers for that same message. Bottom-pinning is its own case
+// (same convention as followTranscript) rather than folded into the
+// message anchor, since anchoring to "the last message" wouldn't
+// necessarily still read as "the bottom" once a long reply under it
+// changes where the true bottom actually lands.
+func (a *App) resizeAndPreserveScroll() {
+	wasAtBottom := a.viewport.AtBottom()
+	anchor := a.scrollAnchor()
+
+	a.layout()
+
+	switch {
+	case wasAtBottom:
+		a.viewport.GotoBottom()
+	case anchor >= 0 && anchor < len(a.userMsgLines):
+		a.viewport.SetYOffset(a.userMsgLines[anchor])
+	}
+}
+
+// scrollAnchor returns the index into a.userMsgLines of the last user
+// message at or before the viewport's current scroll position, or -1 if
+// the viewport is scrolled above the first message (e.g. still showing
+// the boot banner).
+func (a *App) scrollAnchor() int {
+	anchor := -1
+	for i, line := range a.userMsgLines {
+		if line <= a.viewport.YOffset() {
+			anchor = i
+		}
+	}
+	return anchor
+}
+
 func (a *App) paletteWidth() int  { return min(a.width-8, 50) }
 func (a *App) paletteHeight() int { return min(a.height-8, 12) }
+
+// renderWidth is the actual column count every full-width component
+// renders at — one column narrower than the terminal's own reported
+// width. Purely a safety margin: during a fast interactive resize, a
+// WindowSizeMsg can lag the terminal's true current size by a frame or
+// two, and content rendered at exactly the terminal's full width wraps
+// onto an unwanted extra line the instant that happens — visible live
+// as the input box's own border wrapping and everything below it
+// snapping down, then back once the next WindowSizeMsg catches state
+// up. One column of slack on the right absorbs that lag before it ever
+// reaches the terminal's real edge. Not applied to popups (paletteWidth/
+// textPopupWidth) — those are already narrower and centered, nowhere
+// near the edge to begin with.
+func (a *App) renderWidth() int {
+	return max(a.width-1, 0)
+}
 
 func (a *App) View() tea.View {
 	if !a.ready {
 		return tea.NewView("")
 	}
 
-	topBar := renderTopBar(a.styles, a.width, a.sessionID, a.contextUsed, a.contextWindow)
+	width := a.renderWidth()
+	topBar := renderTopBar(a.styles, width, a.sessionID, a.contextUsed, a.contextWindow)
 	body := a.viewport.View()
 	if sticky := a.stickyPromptOverlay(); sticky != "" {
 		body = overlay(body, sticky, 0, 0, a.viewport.Width())
 	}
-	workingAnimBlock := blankWorkingAnim(a.styles.Theme, a.width)
+	workingAnimBlock := blankWorkingAnim(a.styles.Theme, width)
 	if a.workingAnimShouldRun() {
-		workingAnimBlock = a.workingAnim.render(a.styles.Theme, a.width, a.workingLabel)
+		workingAnimBlock = a.workingAnim.render(a.styles.Theme, width, a.workingLabel)
 	}
-	inputBar := renderInputBar(a.styles, a.input, a.width, a.inputLines, true)
-	footer := renderHelpFooter(a.styles, a.permissionMode == permissionFullAuto, a.verboseTools, a.width)
+	inputBar := renderInputBar(a.styles, a.input, width, a.inputLines, true)
+	footer := renderHelpFooter(a.styles, a.permissionMode == permissionFullAuto, a.verboseTools, width)
 
 	parts := []string{topBar, body}
 	if len(a.suggestMatches) > 0 {
-		parts = append(parts, renderSuggestions(a.styles, a.suggestMatches, a.suggestIndex, a.width))
+		parts = append(parts, renderSuggestions(a.styles, a.suggestMatches, a.suggestIndex, width))
 	}
 	parts = append(parts, workingAnimBlock, inputBar, footer)
 
@@ -1031,11 +1121,11 @@ func (a *App) View() tea.View {
 	// against the real screen behind it.
 	switch a.paletteKind {
 	case paletteTextInput:
-		frame = renderTextInputOverlay(frame, a.styles, a.textPopupLabel, a.keyInput, a.width, a.height)
+		frame = renderTextInputOverlay(frame, a.styles, a.textPopupLabel, a.keyInput, width, a.height)
 	case paletteNone:
 		// frame already holds the whole screen; nothing more to composite.
 	default:
-		frame = renderPaletteOverlay(frame, a.styles, a.paletteTitle, a.paletteList, a.width, a.height)
+		frame = renderPaletteOverlay(frame, a.styles, a.paletteTitle, a.paletteList, width, a.height)
 	}
 
 	v := tea.NewView(frame)
