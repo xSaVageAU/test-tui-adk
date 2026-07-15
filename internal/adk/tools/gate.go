@@ -351,17 +351,25 @@ func confirmGated(t tool.Tool, normallyRequires bool, rootName string) tool.Tool
 func (c *confirmGatedTool) Run(ctx agent.Context, args any) (map[string]any, error) {
 	// ctx.ToolConfirmation() being non-nil means a decision already
 	// exists for this call (we requested one below on an earlier pass,
-	// and the human has since answered) — delegate straight to the
-	// wrapped tool, whose own Run checks the same value and honors an
-	// approval or rejection accordingly. Nothing left for this wrapper
-	// to decide on a resumed call.
-	if ctx.ToolConfirmation() == nil && c.requiresConfirmation(ctx.AgentName(), settings.Load().UI.PermissionMode) {
+	// and the human has since answered).
+	tc := ctx.ToolConfirmation()
+	if tc == nil && c.requiresConfirmation(ctx.AgentName(), settings.Load().UI.PermissionMode) {
 		hint := fmt.Sprintf("Please approve or reject the tool call %s() by responding with a FunctionResponse with an expected ToolConfirmation payload.", c.Name())
 		if err := ctx.RequestConfirmation(hint, nil); err != nil {
 			return nil, err
 		}
 		ctx.Actions().SkipSummarization = true
 		return nil, fmt.Errorf("error tool %q %w", c.Name(), tool.ErrConfirmationRequired)
+	}
+	if tc != nil && !tc.Confirmed {
+		// Caught here, before this ever reaches the wrapped tool: ADK's own
+		// functiontool.Run would report a rejection as "error tool %q call
+		// is rejected" — wording that reads like a generic system/
+		// permission failure, and live testing showed a model treating it
+		// as exactly that (something to retry, or find a workaround for)
+		// rather than a human's deliberate decision. This says plainly who
+		// rejected it and that retrying won't help.
+		return nil, fmt.Errorf("the user was asked to approve %s() and explicitly REJECTED it — this was a deliberate human decision. Do not retry this call or attempt another way to accomplish the same thing; ask how they'd like to continue", c.Name())
 	}
 	return c.funcTool.Run(ctx, args)
 }
