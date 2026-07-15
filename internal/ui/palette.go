@@ -25,8 +25,9 @@ const (
 	paletteSessions      // see sessions.go
 	paletteKeyProvider   // /key's first step: which provider is this key for — see keyinput.go
 	paletteAgents        // /agents' top-level list: root + every sub-agent — see agentsmenu.go
-	paletteAgentDetail   // /agents' per-agent list: Provider / Model — see agentsmenu.go
+	paletteAgentDetail   // /agents' per-agent list: Provider / Model / Tools — see agentsmenu.go
 	paletteAgentProvider // /agents' provider picker for whichever agent is selected — see agentsmenu.go
+	paletteAgentTools    // /agents' tools checklist for whichever agent is selected — see agentsmenu.go
 	paletteLoader        // /loader: pick the "agent is working" animation — see workinganim.go
 )
 
@@ -101,13 +102,20 @@ const paletteTitleHeight = 2
 // matter how the title style itself is tuned. renderPaletteTitle renders
 // it ourselves instead, the same way every other row in this app is
 // rendered, so there's nothing bubbles/list didn't paint for us.
-func newPaletteList(items []paletteItem, s theme.Styles, width, height int) list.Model {
+// paletteListItems adapts a plain []paletteItem to what list.Model wants
+// — pulled out so a caller that rebuilds an already-open list's rows in
+// place (see agentsmenu.go's toggleAgentTool) doesn't need to duplicate
+// this conversion.
+func paletteListItems(items []paletteItem) []list.Item {
 	listItems := make([]list.Item, len(items))
 	for i, it := range items {
 		listItems[i] = it
 	}
+	return listItems
+}
 
-	l := list.New(listItems, paletteDelegate{styles: s}, width, max(height-paletteTitleHeight, 0))
+func newPaletteList(items []paletteItem, s theme.Styles, width, height int) list.Model {
+	l := list.New(paletteListItems(items), paletteDelegate{styles: s}, width, max(height-paletteTitleHeight, 0))
 	l.SetShowTitle(false)
 	l.SetShowStatusBar(false)
 	l.SetShowHelp(false)

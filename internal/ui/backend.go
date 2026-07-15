@@ -141,11 +141,22 @@ type BackendFactory func(ctx context.Context, provider, apiKey string) (Backend,
 // reason SessionSummary is: this package never imports adk directly).
 // ID is "" for the root agent, otherwise a sub-agent's own identifier —
 // opaque here, just round-tripped back into SetAgentProvider/
-// SetAgentModel to say which agent an edit is for.
+// SetAgentModel to say which agent an edit is for. Tools is exactly
+// what's currently granted — nil/empty means none, not "defaults."
 type AgentConfigSummary struct {
 	ID       string
 	Name     string
 	Provider string
 	Model    string
+	Tools    []string
 	IsRoot   bool
+}
+
+// ToolSummary is one tool the /agents tools picker can offer a checkbox
+// for — the ui's-eye view of adk.ToolSummary, same reasoning as
+// AgentConfigSummary. Description is shown alongside Name so a user can
+// tell what a tool does without already knowing the codebase.
+type ToolSummary struct {
+	Name        string
+	Description string
 }

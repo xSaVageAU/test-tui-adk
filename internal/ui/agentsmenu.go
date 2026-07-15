@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -49,7 +50,7 @@ func (a *App) openAgentsMenu() {
 	a.openMenu(paletteAgents, "Configure agents", items)
 }
 
-// openAgentDetailMenu is /agents' second step: Provider/Model for
+// openAgentDetailMenu is /agents' second step: Provider/Model/Tools for
 // whichever agent menuID names.
 func (a *App) openAgentDetailMenu(menuID string) {
 	ag, ok := a.agentSummaryFor(menuID)
@@ -61,6 +62,7 @@ func (a *App) openAgentDetailMenu(menuID string) {
 	items := []paletteItem{
 		{id: "provider", title: "Provider", desc: displayProvider(ag.Provider) + " — select to change"},
 		{id: "model", title: "Model", desc: displayModel(ag.Provider, ag.Model) + " — select to edit"},
+		{id: "tools", title: "Tools", desc: fmt.Sprintf("%d enabled — select to configure", len(ag.Tools))},
 	}
 	a.openMenu(paletteAgentDetail, ag.Name, items)
 }
@@ -71,11 +73,18 @@ func (a *App) openAgentDetailMenu(menuID string) {
 // list, the model field is paletteTextInput), so this always returns
 // false ("don't close yet", the new popup is already showing).
 func (a *App) confirmAgentDetailSelection(id string) (bool, tea.Cmd) {
+	target := a.agentMenuTarget
+	back := func() tea.Cmd { a.openAgentDetailMenu(target); return nil }
 	switch id {
 	case "provider":
+		a.pushMenuBack(back)
 		a.openAgentProviderMenu()
 	case "model":
+		a.pushMenuBack(back)
 		a.openAgentModelInput()
+	case "tools":
+		a.pushMenuBack(back)
+		a.openAgentToolsMenu()
 	}
 	return false, nil
 }
@@ -118,6 +127,104 @@ func (a *App) openAgentModelInput() {
 	a.paletteKind = paletteTextInput
 }
 
+// openAgentToolsMenu shows the tools checklist for whichever agent
+// agentMenuTarget names — one row per tool this app can grant, a
+// checkbox reflecting whether it's currently enabled for that agent.
+// Fetches the full registry once here (agentToolsAll) rather than on
+// every toggle; agentToolsCurrent is seeded from the agent's own
+// current list so a later toggle only needs to flip one entry, not
+// re-derive the whole set.
+func (a *App) openAgentToolsMenu() {
+	ag, ok := a.agentSummaryFor(a.agentMenuTarget)
+	if !ok {
+		a.systemMessage("That agent is no longer available.")
+		return
+	}
+	if a.listTools == nil {
+		a.systemMessage("Tool configuration isn't available.")
+		return
+	}
+	all, err := a.listTools()
+	if err != nil {
+		a.systemMessage("Could not list tools: " + err.Error())
+		return
+	}
+
+	a.agentToolsAll = all
+	a.agentToolsCurrent = make(map[string]bool, len(ag.Tools))
+	for _, name := range ag.Tools {
+		a.agentToolsCurrent[name] = true
+	}
+	a.agentToolsChanged = false
+
+	a.openMenu(paletteAgentTools, ag.Name+" tools", a.agentToolsItems())
+}
+
+// agentToolsItems renders agentToolsAll/agentToolsCurrent into the
+// checklist's rows — called once when the page opens and again after
+// every toggle, so the checkbox glyph always reflects the latest state.
+func (a *App) agentToolsItems() []paletteItem {
+	items := make([]paletteItem, len(a.agentToolsAll))
+	for i, t := range a.agentToolsAll {
+		box := "[ ]"
+		if a.agentToolsCurrent[t.Name] {
+			box = "[x]"
+		}
+		items[i] = paletteItem{id: t.Name, title: box + " " + t.Name, desc: t.Description}
+	}
+	return items
+}
+
+// toggleAgentTool flips one tool's enabled state for agentMenuTarget,
+// persists the whole updated set immediately (cheap — it's just a JSON
+// write), and rebuilds the checklist in place without closing it, so
+// several tools can be toggled in one visit. The backend itself isn't
+// reloaded here — agentToolsChanged just marks that it needs to be,
+// once (see cancelMenu's paletteAgentTools case), rather than once per
+// checkbox flip.
+func (a *App) toggleAgentTool(name string) {
+	a.agentToolsCurrent[name] = !a.agentToolsCurrent[name]
+	a.agentToolsChanged = true
+
+	enabled := make([]string, 0, len(a.agentToolsCurrent))
+	for _, t := range a.agentToolsAll {
+		if a.agentToolsCurrent[t.Name] {
+			enabled = append(enabled, t.Name)
+		}
+	}
+	if a.setAgentTools != nil {
+		if err := a.setAgentTools(agentConfigID(a.agentMenuTarget), enabled); err != nil {
+			a.systemMessage("Could not update tools: " + err.Error())
+		}
+	}
+	// Backing out to the detail page (see confirmAgentDetailSelection's
+	// push) reads its "N enabled" row straight from agentMenuSummaries —
+	// without this it'd keep showing the count from when /agents first
+	// opened, since that page never re-fetches on its own.
+	a.refreshAgentSummary(a.agentMenuTarget, func(ag *AgentConfigSummary) { ag.Tools = enabled })
+
+	selected := a.paletteList.Index()
+	a.paletteList.SetItems(paletteListItems(a.agentToolsItems()))
+	a.paletteList.Select(selected)
+}
+
+// refreshAgentSummary patches agentMenuSummaries' entry for menuID in
+// place after a successful provider/model/tools edit. Needed now that
+// confirming an edit goes back to the agent's detail page (see
+// backOrClose) instead of closing the whole /agents popup — without this
+// that page would keep showing whatever agentMenuSummaries held when
+// /agents first opened (see openAgentsMenu), not the edit that was just
+// saved.
+func (a *App) refreshAgentSummary(menuID string, mutate func(*AgentConfigSummary)) {
+	for i := range a.agentMenuSummaries {
+		ag := &a.agentMenuSummaries[i]
+		if (ag.IsRoot && menuID == rootAgentMenuID) || (!ag.IsRoot && ag.ID == menuID) {
+			mutate(ag)
+			return
+		}
+	}
+}
+
 // saveAgentProvider persists provider for agentMenuTarget and kicks off
 // a reload — called from confirmMenuSelection's paletteAgentProvider
 // case, so id there is the chosen provider, not an agent id.
@@ -129,6 +236,7 @@ func (a *App) saveAgentProvider(provider string) tea.Cmd {
 		a.systemMessage("Could not update provider: " + err.Error())
 		return nil
 	}
+	a.refreshAgentSummary(a.agentMenuTarget, func(ag *AgentConfigSummary) { ag.Provider = provider })
 	a.systemMessage("Provider set to " + providerDisplayName(provider) + ". Reloading agents...")
 	return a.reloadBackend()
 }
@@ -139,17 +247,17 @@ func (a *App) saveAgentProvider(provider string) tea.Cmd {
 func (a *App) submitAgentModel() tea.Cmd {
 	modelName := strings.TrimSpace(a.keyInput.Value())
 	target := a.agentMenuTarget
-	a.closeMenu()
 
 	if a.setAgentModel == nil {
-		return nil
+		return a.backOrClose(a.closeMenuCmd)
 	}
 	if err := a.setAgentModel(agentConfigID(target), modelName); err != nil {
 		a.systemMessage("Could not update model: " + err.Error())
-		return nil
+		return a.backOrClose(a.closeMenuCmd)
 	}
+	a.refreshAgentSummary(target, func(ag *AgentConfigSummary) { ag.Model = modelName })
 	a.systemMessage("Model updated. Reloading agents...")
-	return a.reloadBackend()
+	return tea.Batch(a.backOrClose(a.closeMenuCmd), a.reloadBackend())
 }
 
 // reloadBackend rebuilds the whole backend from whatever's currently
@@ -167,6 +275,11 @@ func (a *App) reloadBackend() tea.Cmd {
 		a.systemMessage("Saved — reload (restart, or edit again) once the current response finishes for it to take effect.")
 		return nil
 	}
+	// Whatever's on disk right now (including any tool toggles — see
+	// toggleAgentTool) is about to be picked up by this reload, so
+	// cancelMenu's own end-of-flow reload has nothing left to do for
+	// those once this one lands.
+	a.agentToolsChanged = false
 	factory := a.newBackend
 	return func() tea.Msg {
 		backend, err := factory(context.Background(), "", "")

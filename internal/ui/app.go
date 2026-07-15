@@ -168,15 +168,47 @@ type App struct {
 	agentMenuTarget    string
 	agentMenuSummaries []AgentConfigSummary
 
-	// listAgents/setAgentProvider/setAgentModel back /agents — nil
-	// disables the command (mirrors newBackend's nil-disables-/key
-	// convention). See agentsmenu.go.
+	// agentToolsAll/agentToolsCurrent/agentToolsChanged back /agents'
+	// "Tools" step specifically — agentToolsAll is the full registry,
+	// fetched once when that page opens; agentToolsCurrent is which of
+	// those are enabled for agentMenuTarget, mutated (and persisted) as
+	// the user toggles checkboxes; agentToolsChanged tracks whether the
+	// backend needs reloading once the page closes, so N toggles cost
+	// one reload instead of N. See agentsmenu.go's openAgentToolsMenu/
+	// toggleAgentTool.
+	agentToolsAll     []ToolSummary
+	agentToolsCurrent map[string]bool
+	agentToolsChanged bool
+
+	// listAgents/setAgentProvider/setAgentModel/setAgentTools/listTools
+	// back /agents — nil disables the command (mirrors newBackend's
+	// nil-disables-/key convention). See agentsmenu.go.
 	listAgents       func() ([]AgentConfigSummary, error)
 	setAgentProvider func(id, provider string) error
 	setAgentModel    func(id, modelName string) error
+	setAgentTools    func(id string, tools []string) error
+	listTools        func() ([]ToolSummary, error)
 
 	suggestMatches []commandSpec // live "/command" matches for the current input, if any
 	suggestIndex   int
+
+	// menuBack is a stack of "how to reopen the menu on screen right now"
+	// closures, pushed whenever a menu opens a nested step (e.g. /agents'
+	// detail page opening Provider/Model/Tools, or /settings opening a
+	// numeric field) — see pushMenuBack/backOrClose in commands.go. Esc and
+	// a terminal selection both pop this before falling back to actually
+	// leaving the popup, so stepping out of a nested menu goes back one
+	// level instead of dropping all the way out to the chat.
+	menuBack []func() tea.Cmd
+
+	// popupWidth/popupHeight are /settings' "Popup width"/"Popup height"
+	// overrides — 0 means unset (use popupWidthDefault/popupHeightDefault,
+	// see effectivePopupWidth/effectivePopupHeight). Every popup modal
+	// (the command palette, /settings, /agents, and the /key and
+	// /agents-model text fields) shares these two values — see
+	// paletteWidth/paletteHeight/textPopupWidth.
+	popupWidth  int
+	popupHeight int
 }
 
 // AppConfig bundles NewApp's startup inputs. Grew past the point where a
@@ -205,16 +237,22 @@ type AppConfig struct {
 	// very first frame. Meaningless without a Backend — leave 0 when
 	// Backend is nil.
 	ContextWindow int
-	// ListAgents/SetAgentProvider/SetAgentModel back /agents — reading
-	// and editing config files directly, independent of whether a
-	// Backend connection currently exists (unlike NewBackend, these work
-	// even with Backend nil — fixing a bad provider/model is exactly
-	// what you'd want /agents for in that state). Pass nil for all three
-	// to disable /agents entirely, same as leaving NewBackend nil
-	// disables /key.
+	// ListAgents/SetAgentProvider/SetAgentModel/SetAgentTools back
+	// /agents — reading and editing config files directly, independent
+	// of whether a Backend connection currently exists (unlike
+	// NewBackend, these work even with Backend nil — fixing a bad
+	// provider/model is exactly what you'd want /agents for in that
+	// state). Pass nil for all four to disable /agents entirely, same as
+	// leaving NewBackend nil disables /key.
 	ListAgents       func() ([]AgentConfigSummary, error)
 	SetAgentProvider func(id, provider string) error
 	SetAgentModel    func(id, modelName string) error
+	SetAgentTools    func(id string, tools []string) error
+	// ListTools backs /agents' tools picker — every tool that could be
+	// granted, independent of which agent (or none) is currently
+	// selected. nil disables the "Tools" row entirely, same convention
+	// as the four above.
+	ListTools func() ([]ToolSummary, error)
 }
 
 // NewApp constructs the app with the default (first-registered) theme
@@ -246,6 +284,8 @@ func NewApp(cfg AppConfig) *App {
 		streamReplies:    uiSettings.StreamReplies,
 		verboseTools:     uiSettings.VerboseTools,
 		showReasoning:    !uiSettings.HideReasoningText,
+		popupWidth:       uiSettings.PopupWidth,
+		popupHeight:      uiSettings.PopupHeight,
 		hitlMode:         parseHITLMode(uiSettings.HITLMode),
 		permissionMode:   parsePermissionMode(uiSettings.PermissionMode),
 		inputLines:       minInputLines,
@@ -254,6 +294,8 @@ func NewApp(cfg AppConfig) *App {
 		listAgents:       cfg.ListAgents,
 		setAgentProvider: cfg.SetAgentProvider,
 		setAgentModel:    cfg.SetAgentModel,
+		setAgentTools:    cfg.SetAgentTools,
+		listTools:        cfg.ListTools,
 		workingAnim:      newWorkingAnimState(parseWorkingAnimVariant(uiSettings.WorkingAnim)),
 		workingLabel:     "thinking",
 	}
@@ -464,6 +506,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a *App) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Quit):
+		switch {
+		case a.paletteKind == paletteConfirm, a.pendingConfirmation != nil:
+			// A HITL approval is blocking the turn — ctrl+c reads the same
+			// as Esc/n here (deny) rather than abandoning the whole app
+			// mid-decision.
+			return a, a.resolveConfirmation(false)
+		case a.paletteKind != paletteNone:
+			return a, a.backOrClose(a.cancelMenu)
+		}
 		return a, tea.Quit
 
 	case key.Matches(msg, keys.AutoAccept):
@@ -543,18 +594,16 @@ func (a *App) handleSuggestKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (a *App) handlePaletteKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Escape):
-		a.cancelMenu()
-		return a, nil
+		return a, a.backOrClose(a.cancelMenu)
 
 	case key.Matches(msg, keys.Send):
 		item, ok := a.paletteList.SelectedItem().(paletteItem)
 		if !ok {
-			a.closeMenu()
-			return a, nil
+			return a, a.backOrClose(a.closeMenuCmd)
 		}
 		closeAfter, cmd := a.confirmMenuSelection(item.id)
 		if closeAfter {
-			a.closeMenu()
+			return a, tea.Batch(cmd, a.backOrClose(a.closeMenuCmd))
 		}
 		return a, cmd
 	}
@@ -1071,8 +1120,43 @@ func (a *App) scrollAnchor() int {
 	return anchor
 }
 
-func (a *App) paletteWidth() int  { return min(a.width-8, 50) }
-func (a *App) paletteHeight() int { return min(a.height-8, 12) }
+// popupWidthDefault/popupHeightDefault are every popup's outer size until
+// /settings' "Popup width"/"Popup height" is explicitly set (see
+// effectivePopupWidth/effectivePopupHeight) — the exact values this app
+// shipped with before that setting existed, so an untouched install looks
+// unchanged. popup{Width,Height}{Min,Max} bound what a typed value in
+// that setting's text field is clamped to (see submitPopupSize in
+// commands.go) — floors keep a popup legible, ceilings keep a typo like
+// an extra zero from being taken literally.
+const (
+	popupWidthDefault  = 50
+	popupHeightDefault = 12
+	popupWidthMin      = 24
+	popupWidthMax      = 200
+	popupHeightMin     = 6
+	popupHeightMax     = 80
+)
+
+func (a *App) effectivePopupWidth() int {
+	if a.popupWidth > 0 {
+		return a.popupWidth
+	}
+	return popupWidthDefault
+}
+
+func (a *App) effectivePopupHeight() int {
+	if a.popupHeight > 0 {
+		return a.popupHeight
+	}
+	return popupHeightDefault
+}
+
+// paletteWidth/paletteHeight are every list-backed popup's actual
+// on-screen size: the configured (or default) size, still clamped to the
+// terminal's own dimensions so a large configured popup never overflows
+// a small window.
+func (a *App) paletteWidth() int  { return min(a.width-8, a.effectivePopupWidth()) }
+func (a *App) paletteHeight() int { return min(a.height-8, a.effectivePopupHeight()) }
 
 // renderWidth is the actual column count every full-width component
 // renders at — one column narrower than the terminal's own reported

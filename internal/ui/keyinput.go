@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
 	"tui-testing/internal/theme"
@@ -23,6 +24,8 @@ const (
 	textPopupNone textPopupKind = iota
 	textPopupAPIKey
 	textPopupAgentModel
+	textPopupPopupWidth  // /settings' "Popup width" field — see openPopupSizeInput/submitPopupSize
+	textPopupPopupHeight // /settings' "Popup height" field
 )
 
 // providerGemini/providerOpenRouter mirror adk.ProviderGemini/
@@ -37,14 +40,10 @@ const (
 	providerOpenRouter = "openrouter"
 )
 
-// textPopupMaxWidth caps how wide the /key and /agents model popups
-// grow on a roomy terminal — plenty of headroom for a full API key or
-// model slug at a glance without stretching edge-to-edge on a wide window.
-const textPopupMaxWidth = 64
-
-// textPopupWidth is the popup's target outer width: roomy but clamped to
-// the terminal so it doesn't overflow a narrow one.
-func (a *App) textPopupWidth() int { return min(a.width-8, textPopupMaxWidth) }
+// textPopupWidth is the popup's target outer width — same configured (or
+// default) size every other popup uses (see effectivePopupWidth in
+// app.go), clamped to the terminal so it doesn't overflow a narrow one.
+func (a *App) textPopupWidth() int { return min(a.width-8, a.effectivePopupWidth()) }
 
 // openKeyProviderMenu is /key's first step: which provider is this key
 // for. Selecting one opens the masked text field (openKeyInput) scoped
@@ -85,6 +84,31 @@ func (a *App) openKeyInput(provider string) {
 	a.paletteKind = paletteTextInput
 }
 
+// openPopupSizeInput shows the numeric popup field for /settings' "Popup
+// width"/"Popup height" rows — same text-field popup as /key and /agents'
+// model field, just prefilled with current (the effective size in effect
+// right now) instead of an empty/masked value. See submitPopupSize for
+// where the typed value is parsed, clamped, and persisted.
+func (a *App) openPopupSizeInput(kind textPopupKind, label string, current int) {
+	ti := textinput.New()
+	ti.CharLimit = 4
+	ti.SetWidth(a.textPopupWidth() - 4)
+	styles := ti.Styles()
+	styles.Focused.Prompt = a.styles.InputPrompt
+	styles.Focused.Placeholder = a.styles.InputHint
+	styles.Blurred.Prompt = a.styles.InputPrompt
+	styles.Blurred.Placeholder = a.styles.InputHint
+	ti.SetStyles(styles)
+	ti.SetValue(strconv.Itoa(current))
+	ti.CursorEnd()
+	ti.Focus()
+
+	a.keyInput = ti
+	a.textPopupKind = kind
+	a.textPopupLabel = label
+	a.paletteKind = paletteTextInput
+}
+
 func keyPlaceholderFor(provider string) string {
 	if provider == providerOpenRouter {
 		return "sk-or-..."
@@ -105,13 +129,14 @@ func providerDisplayName(provider string) string {
 func (a *App) handleTextInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.Escape):
-		a.cancelMenu()
-		return a, nil
+		return a, a.backOrClose(a.cancelMenu)
 
 	case key.Matches(msg, keys.Send):
 		switch a.textPopupKind {
 		case textPopupAgentModel:
 			return a, a.submitAgentModel()
+		case textPopupPopupWidth, textPopupPopupHeight:
+			return a, a.submitPopupSize()
 		default:
 			return a, a.submitKey()
 		}
@@ -130,22 +155,22 @@ func (a *App) handleTextInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (a *App) submitKey() tea.Cmd {
 	apiKey := strings.TrimSpace(a.keyInput.Value())
 	provider := a.textPopupProvider
-	a.closeMenu()
+	backCmd := a.backOrClose(a.closeMenuCmd)
 
 	if apiKey == "" {
-		return nil
+		return backCmd
 	}
 	if a.newBackend == nil {
 		a.systemMessage("Can't set a key: no backend factory configured.")
-		return nil
+		return backCmd
 	}
 
 	factory := a.newBackend
 	label := providerDisplayName(provider) + " API key set."
-	return func() tea.Msg {
+	return tea.Batch(backCmd, func() tea.Msg {
 		backend, err := factory(context.Background(), provider, apiKey)
 		return keySetMsg{backend: backend, err: err, successMsg: label, failPrefix: "Could not connect with that key"}
-	}
+	})
 }
 
 // keySetMsg carries the result of an async backend rebuild — submitKey's

@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"tui-testing/internal/appdir"
+
+	"tui-testing/internal/adk/tools"
 )
 
 // AgentSummary is one agent's identity plus model selection, as read
@@ -16,13 +19,46 @@ import (
 // ui/adk package boundary — ui never imports this package directly).
 // ID is "" for the root agent, or the sub-agent's subagents/<ID>
 // directory name — the same value SetAgentProvider/SetAgentModel expect
-// back to know which agent.json to write.
+// back to know which agent.json to write. Tools is exactly what's
+// stored on disk (see agentFileConfig.Tools) — nil/empty means the
+// agent currently has none granted, not "use some default set."
 type AgentSummary struct {
 	ID       string
 	Name     string
 	Provider string
 	Model    string
+	Tools    []string
 	IsRoot   bool
+}
+
+// ToolSummary is one tool this app can grant to an agent — the full
+// universe /agents' tools picker offers checkboxes for, independent of
+// which agents currently have which enabled. Description is the same
+// text the model itself sees (tool.Tool.Description()), shown in the
+// picker so a user can tell what a tool actually does without having to
+// already know the codebase.
+type ToolSummary struct {
+	Name        string
+	Description string
+}
+
+// ListToolSummaries returns every tool tools.Registry can build, sorted
+// by name. rootName doesn't matter for this — per tools.Registry's own
+// doc comment it only affects a tool's runtime confirmation behavior
+// (see tools/gate.go), not its name, description, or construction — so
+// "" is passed; this is enumeration, nothing here is ever actually
+// invoked.
+func ListToolSummaries() ([]ToolSummary, error) {
+	reg, err := tools.Registry("")
+	if err != nil {
+		return nil, fmt.Errorf("build tool registry: %w", err)
+	}
+	out := make([]ToolSummary, 0, len(reg))
+	for _, t := range reg {
+		out = append(out, ToolSummary{Name: t.Name(), Description: t.Description()})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
 }
 
 // ListAgentConfigs reads the root agent plus every discovered sub-agent
@@ -35,7 +71,7 @@ func ListAgentConfigs() ([]AgentSummary, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load root agent config: %w", err)
 	}
-	out := []AgentSummary{{Name: root.Name, Provider: root.Provider, Model: root.Model, IsRoot: true}}
+	out := []AgentSummary{{Name: root.Name, Provider: root.Provider, Model: root.Model, Tools: root.Tools, IsRoot: true}}
 
 	dir, err := subAgentsDir()
 	if err != nil {
@@ -53,7 +89,7 @@ func ListAgentConfigs() ([]AgentSummary, error) {
 		if err != nil {
 			return nil, fmt.Errorf("sub-agent %q: %w", e.Name(), err)
 		}
-		out = append(out, AgentSummary{ID: e.Name(), Name: cfg.Name, Provider: cfg.Provider, Model: cfg.Model})
+		out = append(out, AgentSummary{ID: e.Name(), Name: cfg.Name, Provider: cfg.Provider, Model: cfg.Model, Tools: cfg.Tools})
 	}
 	return out, nil
 }
@@ -71,6 +107,14 @@ func SetAgentProvider(id, provider string) error {
 
 func SetAgentModel(id, modelName string) error {
 	return updateAgentConfig(id, func(cfg *agentFileConfig) { cfg.Model = modelName })
+}
+
+// SetAgentTools replaces an agent's whole tools list — the /agents tools
+// picker writes the full current selection on every checkbox toggle
+// rather than one name at a time, so this mirrors that shape instead of
+// an add/remove pair.
+func SetAgentTools(id string, toolNames []string) error {
+	return updateAgentConfig(id, func(cfg *agentFileConfig) { cfg.Tools = toolNames })
 }
 
 func configDirFor(id string) (string, error) {

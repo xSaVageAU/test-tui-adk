@@ -64,6 +64,15 @@ type UISettings struct {
 	// negation, kept at this one boundary rather than spreading
 	// !hideReasoningText through render code.
 	HideReasoningText bool `json:"hideReasoningText"`
+	// PopupWidth/PopupHeight override the outer size every popup modal
+	// renders at (the command palette, /settings, /agents, the /key and
+	// /agents-model text fields — see internal/ui/app.go's
+	// effectivePopupWidth/effectivePopupHeight, the only readers of these
+	// two fields). 0 means "unset", falling back to popupWidthDefault/
+	// popupHeightDefault there — omitempty keeps an untouched
+	// settings.json free of two keys nobody's ever edited.
+	PopupWidth  int `json:"popupWidth,omitempty"`
+	PopupHeight int `json:"popupHeight,omitempty"`
 }
 
 // ModeNormal/ModeFullAuto are PermissionMode's only two valid values —

@@ -44,12 +44,12 @@ func newBackend(ctx context.Context, provider, apiKey string) (ui.Backend, error
 	return client, nil
 }
 
-// listAgents/setAgentProvider/setAgentModel adapt the adk package's
-// config read/write functions to the plain function shapes ui.AppConfig
-// expects — same bridging reason as newBackend/BackendFactory: the ui
-// package never imports adk directly, only these caller-supplied
-// closures (and the ui.AgentConfigSummary shape, converted to/from
-// adk.AgentSummary here).
+// listAgents/setAgentProvider/setAgentModel/setAgentTools/listTools
+// adapt the adk package's config read/write functions to the plain
+// function shapes ui.AppConfig expects — same bridging reason as
+// newBackend/BackendFactory: the ui package never imports adk directly,
+// only these caller-supplied closures (and the ui.AgentConfigSummary/
+// ui.ToolSummary shapes, converted to/from their adk counterparts here).
 func listAgents() ([]ui.AgentConfigSummary, error) {
 	agents, err := adk.ListAgentConfigs()
 	if err != nil {
@@ -57,7 +57,19 @@ func listAgents() ([]ui.AgentConfigSummary, error) {
 	}
 	out := make([]ui.AgentConfigSummary, len(agents))
 	for i, a := range agents {
-		out[i] = ui.AgentConfigSummary{ID: a.ID, Name: a.Name, Provider: a.Provider, Model: a.Model, IsRoot: a.IsRoot}
+		out[i] = ui.AgentConfigSummary{ID: a.ID, Name: a.Name, Provider: a.Provider, Model: a.Model, Tools: a.Tools, IsRoot: a.IsRoot}
+	}
+	return out, nil
+}
+
+func listTools() ([]ui.ToolSummary, error) {
+	tools, err := adk.ListToolSummaries()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ui.ToolSummary, len(tools))
+	for i, t := range tools {
+		out[i] = ui.ToolSummary{Name: t.Name, Description: t.Description}
 	}
 	return out, nil
 }
@@ -115,6 +127,8 @@ func main() {
 		ListAgents:       listAgents,
 		SetAgentProvider: adk.SetAgentProvider,
 		SetAgentModel:    adk.SetAgentModel,
+		SetAgentTools:    adk.SetAgentTools,
+		ListTools:        listTools,
 	})
 
 	// AltScreen and MouseMode are set on the tea.View returned from
