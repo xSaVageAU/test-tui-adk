@@ -1,0 +1,19 @@
+{
+  "name": "Cherry Bubblegum",
+  "background": "#150d16",
+  "surface": "#1f1620",
+  "highlight": "#2c1f33",
+  "border": "#3a2d40",
+  "borderFocus": "#ff3d68",
+  "text": "#f5e6ee",
+  "textMuted": "#b09aad",
+  "textFaint": "#6b5a68",
+  "textOnFill": "#150d16",
+  "accent": "#ff3d68",
+  "accentMuted": "#a3384f",
+  "reasoning": "#3ec9ff",
+  "success": "#7fe0a7",
+  "warning": "#ffc266",
+  "error": "#ff5252",
+  "attention": "#3ec9ff"
+}

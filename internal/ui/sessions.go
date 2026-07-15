@@ -33,6 +33,7 @@ func (a *App) resetTranscriptState() {
 	a.pendingConfirmation = nil
 	a.confirmQueue = nil
 	a.confirmDecisions = nil
+	a.turnCancel = nil
 	a.turnUsage, a.turnFinishReason = nil, ""
 	a.contextUsed = 0
 	a.lastPromptText = ""

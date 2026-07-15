@@ -91,16 +91,12 @@ type Styles struct {
 	// oversized response — see View()'s sticky-overlay compositing.
 	StickyPrompt lipgloss.Style
 
-	// Boot banner: a bordered panel printed once as the transcript's first
-	// entry. Every text style here carries Background(Surface) — same
-	// reason as the popup rows above, since this shares that panel look.
-	// BootRule is the thin divider between the tagline and the info rows.
-	BootBorder  lipgloss.Style
-	BootTitle   lipgloss.Style
-	BootTagline lipgloss.Style
-	BootRule    lipgloss.Style
-	BootLabel   lipgloss.Style
-	BootValue   lipgloss.Style
+	// BootArt styles the block-letter boot banner (see bootart.go) —
+	// Background(Background), not Surface: there's no panel behind it
+	// anymore, just the art sitting directly on the app's own background,
+	// so it has to match that exactly rather than the "raised panel" tint
+	// the rest of this file's Surface-backed styles use.
+	BootArt lipgloss.Style
 
 	// Input bar
 	InputBar        lipgloss.Style
@@ -331,33 +327,9 @@ func New(t Theme) Styles {
 		Foreground(lipgloss.Color(t.Text)).
 		Bold(true)
 
-	s.BootBorder = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(t.Accent)).
-		BorderBackground(lipgloss.Color(t.Background)).
-		Background(lipgloss.Color(t.Surface)).
-		Padding(1, 2)
-
-	s.BootTitle = lipgloss.NewStyle().
+	s.BootArt = lipgloss.NewStyle().
 		Foreground(lipgloss.Color(t.Accent)).
-		Background(lipgloss.Color(t.Surface)).
-		Bold(true)
-
-	s.BootTagline = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(t.TextMuted)).
-		Background(lipgloss.Color(t.Surface))
-
-	s.BootRule = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(t.Border)).
-		Background(lipgloss.Color(t.Surface))
-
-	s.BootLabel = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(t.TextFaint)).
-		Background(lipgloss.Color(t.Surface))
-
-	s.BootValue = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(t.Text)).
-		Background(lipgloss.Color(t.Surface)).
+		Background(lipgloss.Color(t.Background)).
 		Bold(true)
 
 	// Background(Surface), not Background: Theme's own doc comment already

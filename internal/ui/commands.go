@@ -29,6 +29,7 @@ var commandSpecs = []commandSpec{
 	{Name: "key", Desc: "Set a provider API key"},
 	{Name: "agents", Desc: "Configure agent provider/model"},
 	{Name: "loader", Desc: "Choose the \"working\" animation"},
+	{Name: "exit", Desc: "Quit the app"},
 }
 
 // commandQuery returns the text after a leading "/" in the input box, and
@@ -95,8 +96,13 @@ func (a *App) runCommand(name string) tea.Cmd {
 		a.openAgentsMenu()
 	case "loader":
 		return a.openLoaderMenu()
+	case "exit":
+		// A typed, deliberate command — unlike ctrl+c (see handleKey),
+		// this never needs the "press again to confirm" safety net, so it
+		// quits immediately regardless of what else is going on.
+		return tea.Quit
 	default:
-		a.systemMessage("Unknown command: /" + name + " — try /new, /sessions, /theme, /settings, /key, /agents, or /loader.")
+		a.systemMessage("Unknown command: /" + name + " — try /new, /sessions, /theme, /settings, /key, /agents, /loader, or /exit.")
 	}
 	return nil
 }

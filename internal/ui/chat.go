@@ -14,16 +14,16 @@ import (
 
 // renderTranscript renders the boot banner plus the full message log as a
 // single string for the viewport's SetContent. Kept as a pure function of
-// (styles, boot, messages, width) so it's trivial to re-render after a
-// theme swap or resize.
+// (styles, messages, width) so it's trivial to re-render after a theme
+// swap or resize.
 //
 // It also returns the line (row) each RoleUser message's block starts
 // at, so PgUp/PgDn can jump viewport.YOffset straight to a prompt instead
 // of scrolling a fixed page height — cheap to compute here alongside the
 // render pass instead of re-walking the content separately.
-func renderTranscript(s theme.Styles, boot BootInfo, messages []ChatMessage, width int, highlightUser, verboseTools, showReasoning bool) (content string, userMsgLines []int) {
+func renderTranscript(s theme.Styles, messages []ChatMessage, width int, highlightUser, verboseTools, showReasoning bool) (content string, userMsgLines []int) {
 	var sb strings.Builder
-	bootBlock := renderBootArt(s, boot, width)
+	bootBlock := renderBootArt(s, width)
 	sb.WriteString(bootBlock)
 	line := lipgloss.Height(bootBlock)
 

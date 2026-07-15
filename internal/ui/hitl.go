@@ -227,8 +227,12 @@ func (a *App) resolveConfirmation(approved bool) tea.Cmd {
 	backend := a.backend
 	sessionID := a.sessionID
 	animCmd := a.startWorkingAnim()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	a.turnCancel = cancel
+
 	return tea.Batch(animCmd, reasonCmd, func() tea.Msg {
-		ch, err := backend.RespondToConfirmation(context.Background(), sessionID, decisions)
+		ch, err := backend.RespondToConfirmation(ctx, sessionID, decisions)
 		if err != nil {
 			return agentReplyMsg{err: err}
 		}

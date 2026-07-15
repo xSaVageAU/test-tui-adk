@@ -6,6 +6,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -31,6 +32,11 @@ const (
 	topBarHeight = 2
 	footerHeight = 1
 )
+
+// quitConfirmWindow is how long a "ctrl+c again to exit" arming (see
+// App.quitArmedAt) stays live — a second press after this long is
+// treated as a fresh first press instead of the confirmation.
+const quitConfirmWindow = 2 * time.Second
 
 // App is the root tea.Model. It owns global state (theme, size, active
 // agent) and delegates rendering of each region to that region's own
@@ -108,6 +114,23 @@ type App struct {
 	streamChan        <-chan StreamChunk
 	streamingMsgIndex int
 	toolMsgIndex      map[string]int // tool call ID -> index into messages; see upsertToolMessage
+
+	// turnCancel cancels the context backing whichever Send/Stream/
+	// RespondToConfirmation call is currently in flight, if any — set at
+	// the start of dispatchToBackend and resolveConfirmation's final
+	// batch send, cleared the moment that call's result lands (success,
+	// error, or this same cancellation). ctrl+c calls it (see handleKey/
+	// stopTurn) to stop the agent mid-turn instead of quitting the app;
+	// nil whenever nothing is running, which is also how handleKey tells
+	// "the agent is working" apart from "the main view."
+	turnCancel context.CancelFunc
+
+	// quitArmedAt is when ctrl+c was last pressed with nothing else for
+	// it to do (no popup open, no turn running) — a second press within
+	// quitConfirmWindow actually quits; any later press, or one while
+	// something else intercepts ctrl+c first, is treated as a fresh
+	// first press instead. See handleKey.
+	quitArmedAt time.Time
 
 	// contextWindow is the current model's max input tokens (0 if
 	// unknown), set from Backend.ContextWindow on every successful
@@ -372,9 +395,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, cmd
 
 	case agentReplyMsg:
+		a.turnCancel = nil
 		if msg.err != nil {
-			a.status = theme.StatusError
-			a.systemMessage("Error: " + msg.err.Error())
+			a.status = theme.StatusIdle
+			if errors.Is(msg.err, context.Canceled) {
+				a.systemMessage("Stopped.")
+			} else {
+				a.status = theme.StatusError
+				a.systemMessage("Error: " + msg.err.Error())
+			}
 			return a, nil
 		}
 		a.messages = append(a.messages, ChatMessage{Role: RoleAgent, Content: msg.text, At: time.Now()})
@@ -395,6 +424,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case streamChunkMsg:
 		if !msg.ok {
 			a.streamChan = nil
+			a.turnCancel = nil
 			a.status = theme.StatusIdle
 			endCmd := a.endReasoning()
 			a.dropEmptyStreamingPlaceholder()
@@ -410,9 +440,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.chunk.Err != nil {
 			a.streamChan = nil
-			a.status = theme.StatusError
+			a.turnCancel = nil
 			endCmd := a.endReasoning()
-			a.systemMessage("Error: " + msg.chunk.Err.Error())
+			if errors.Is(msg.chunk.Err, context.Canceled) {
+				a.status = theme.StatusIdle
+				a.dropEmptyStreamingPlaceholder()
+				a.systemMessage("Stopped.")
+			} else {
+				a.status = theme.StatusError
+				a.systemMessage("Error: " + msg.chunk.Err.Error())
+			}
 			return a, endCmd
 		}
 		var cmd tea.Cmd
@@ -524,8 +561,16 @@ func (a *App) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return a, a.resolveConfirmation(false)
 		case a.paletteKind != paletteNone:
 			return a, a.backOrClose(a.cancelMenu)
+		case a.turnCancel != nil:
+			a.stopTurn()
+			return a, nil
+		case !a.quitArmedAt.IsZero() && time.Since(a.quitArmedAt) < quitConfirmWindow:
+			return a, tea.Quit
+		default:
+			a.quitArmedAt = time.Now()
+			a.systemMessage("Press ctrl+c again to exit.")
+			return a, nil
 		}
-		return a, tea.Quit
 
 	case key.Matches(msg, keys.AutoAccept):
 		a.toggleAutoAccept()
@@ -691,9 +736,12 @@ func (a *App) dispatchToBackend(text string) tea.Cmd {
 	backend := a.backend
 	animCmd := a.startWorkingAnim()
 
+	ctx, cancel := context.WithCancel(context.Background())
+	a.turnCancel = cancel
+
 	if !a.streamReplies {
 		return tea.Batch(animCmd, func() tea.Msg {
-			reply, err := backend.Send(context.Background(), a.sessionID, text)
+			reply, err := backend.Send(ctx, a.sessionID, text)
 			if err != nil {
 				return agentReplyMsg{err: err}
 			}
@@ -702,12 +750,25 @@ func (a *App) dispatchToBackend(text string) tea.Cmd {
 	}
 
 	return tea.Batch(animCmd, func() tea.Msg {
-		ch, err := backend.Stream(context.Background(), a.sessionID, text)
+		ch, err := backend.Stream(ctx, a.sessionID, text)
 		if err != nil {
 			return agentReplyMsg{err: err}
 		}
 		return streamStartMsg{ch: ch}
 	})
+}
+
+// stopTurn cancels whichever Send/Stream/RespondToConfirmation call is
+// currently in flight (see turnCancel) — ctrl+c's handler while the
+// agent is working (see handleKey). Cancellation itself is async: the
+// backend call notices ctx.Done() and returns a context.Canceled-
+// wrapped error same as any other failure, so the actual teardown
+// (clearing streamChan, ending the working animation) happens once that
+// arrives at streamChunkMsg/agentReplyMsg's handlers in Update, worded
+// as a deliberate stop there rather than an error.
+func (a *App) stopTurn() {
+	a.turnCancel()
+	a.systemMessage("Stopping...")
 }
 
 type agentReplyMsg struct {
@@ -962,7 +1023,7 @@ func (a *App) applyTheme() {
 // keystroke, resize, and cursor blink, so it has to leave scrolling
 // alone; see followTranscript for the variant that's allowed to move it.
 func (a *App) refreshTranscript() {
-	content, userMsgLines := renderTranscript(a.styles, a.bootInfo, a.messages, a.viewport.Width(), a.highlightUser, a.verboseTools, a.showReasoning)
+	content, userMsgLines := renderTranscript(a.styles, a.messages, a.viewport.Width(), a.highlightUser, a.verboseTools, a.showReasoning)
 	a.viewport.SetContent(content)
 	a.userMsgLines = userMsgLines
 }
@@ -1048,11 +1109,14 @@ func (a *App) layout() {
 	}
 
 	inputBoxHeight := a.inputLines + 2 // border top/bottom
-	suggestHeight := 0
+	// The "/" suggestions dropdown takes over the workingAnim's reserved
+	// slot right above the input bar rather than stacking above it (see
+	// View()) — so only one of the two is ever reserved here, not both.
+	reservedHeight := workingAnimHeight
 	if len(a.suggestMatches) > 0 {
-		suggestHeight = len(a.suggestMatches) + 2 // border top/bottom
+		reservedHeight = len(a.suggestMatches) + 2 // border top/bottom
 	}
-	vpHeight := max(a.height-topBarHeight-workingAnimHeight-suggestHeight-inputBoxHeight-footerHeight, 0)
+	vpHeight := max(a.height-topBarHeight-reservedHeight-inputBoxHeight-footerHeight, 0)
 
 	if a.viewport.Width() == 0 {
 		a.viewport = viewport.New(viewport.WithWidth(width), viewport.WithHeight(vpHeight))
@@ -1195,18 +1259,25 @@ func (a *App) View() tea.View {
 	if sticky := a.stickyPromptOverlay(); sticky != "" {
 		body = overlay(body, sticky, 0, 0, a.viewport.Width())
 	}
-	workingAnimBlock := blankWorkingAnim(a.styles.Theme, width)
-	if a.workingAnimShouldRun() {
-		workingAnimBlock = a.workingAnim.render(a.styles.Theme, width, a.workingLabel)
-	}
 	inputBar := renderInputBar(a.styles, a.input, width, a.inputLines, true)
 	footer := renderHelpFooter(a.styles, a.permissionMode == permissionFullAuto, a.verboseTools, width)
 
+	// The "/" suggestions dropdown and the workingAnim both live in the
+	// same slot directly above the input bar — suggestions take priority
+	// over (rather than stacking above) the anim, since both showing at
+	// once would otherwise mean the palette floats above the anim instead
+	// of being attached to the input it's actually completing.
 	parts := []string{topBar, body}
 	if len(a.suggestMatches) > 0 {
 		parts = append(parts, renderSuggestions(a.styles, a.suggestMatches, a.suggestIndex, width))
+	} else {
+		workingAnimBlock := blankWorkingAnim(a.styles.Theme, width)
+		if a.workingAnimShouldRun() {
+			workingAnimBlock = a.workingAnim.render(a.styles.Theme, width, a.workingLabel)
+		}
+		parts = append(parts, workingAnimBlock)
 	}
-	parts = append(parts, workingAnimBlock, inputBar, footer)
+	parts = append(parts, inputBar, footer)
 
 	frame := lipgloss.JoinVertical(lipgloss.Left, parts...)
 

@@ -1,96 +1,108 @@
 package ui
 
 import (
-	"fmt"
-	"strings"
-
 	"tui-testing/internal/theme"
 
 	"charm.land/lipgloss/v2"
 )
 
-// bootMaxWidth caps the banner's width on a roomy terminal — it's meant
-// to read like a compact splash card, not stretch edge to edge.
-const bootMaxWidth = 60
-
 // BootInfo backs the boot banner. Seeded at NewApp time, then kept in
 // sync afterward — Model/Specialists on every successful backend
 // reconnect (see the keySetMsg handler in Update), Theme on every theme
-// change (see applyTheme) — so the banner reflects current reality
-// rather than being a frozen record of launch conditions; it just still
-// only appears once, at the top of the transcript, rather than being a
-// live status widget in its own right (that's what the top bar is for).
-// There's no Agent field: with agent-as-tool as the only delegation
-// pattern, there's exactly one voice in every conversation, so naming it
-// here would just be trivia, not information — see /agents for the
-// configured name if it's ever needed.
+// change (see applyTheme) — so it reflects current reality rather than
+// being a frozen record of launch conditions. Not currently rendered
+// (see renderBootArt, which just prints ascii art for now) — kept live
+// regardless, since showing it again (alongside or instead of the art)
+// is a likely next step, not a hypothetical one.
 type BootInfo struct {
 	Model       string // "" if unknown
 	Theme       string
 	Specialists []string // sub-agents discovered at startup; nil/empty if none
 }
 
-// renderBootArt draws the boot banner: a bordered panel with a title,
-// a one-line project blurb, and a small info table. Every line inside is
-// forced to the same content width so the panel's background fills edge
-// to edge — see the popup title saga elsewhere in this package for why
-// that matters.
-func renderBootArt(s theme.Styles, info BootInfo, width int) string {
-	// Capped at bootMaxWidth on a roomy terminal, but never floored above
-	// what's actually available — a floor here would make the box wider
-	// than the terminal instead of protecting against a narrow one.
-	boxWidth := max(min(width-4, bootMaxWidth), 1)
-	contentWidth := max(boxWidth-6, 0) // minus BootBorder's Padding(1,2) + Border(2)
+// bootArtGlyphs is a tiny 5-row block font, just enough for the letters
+// bootArtWord actually spells — not a general-purpose typeface. '#' is a
+// filled cell, anything else is empty; every glyph is 5 columns wide.
+var bootArtGlyphs = map[rune][5]string{
+	'A': {
+		".###.",
+		"#...#",
+		"#####",
+		"#...#",
+		"#...#",
+	},
+	'G': {
+		".###.",
+		"#....",
+		"#.###",
+		"#...#",
+		".###.",
+	},
+	'E': {
+		"#####",
+		"#....",
+		"###..",
+		"#....",
+		"#####",
+	},
+	'N': {
+		"#...#",
+		"##..#",
+		"#.#.#",
+		"#..##",
+		"#...#",
+	},
+	'T': {
+		"#####",
+		"..#..",
+		"..#..",
+		"..#..",
+		"..#..",
+	},
+}
 
-	title := s.BootTitle.Width(contentWidth).Render("◆ agent-platform")
-	tagline := s.BootTagline.Width(contentWidth).
-		Render("A terminal shell for talking to AI agents — built with Bubble Tea, Lip Gloss, and Google's ADK.")
-	rule := s.BootRule.Width(contentWidth).Render(strings.Repeat("─", contentWidth))
+// bootArtWord is what the boot banner spells — hardcoded for now.
+const bootArtWord = "AGENT"
 
-	rows := []string{
-		bootRow(s, "model", s.BootValue, orPlaceholder(info.Model, "unknown"), contentWidth),
-		bootRow(s, "theme", s.BootValue, orPlaceholder(info.Theme, "unknown"), contentWidth),
-		bootSpecialistsRow(s, info.Specialists, contentWidth),
+// bootArtLines renders word through bootArtGlyphs into 5 lines of plain
+// text (no color yet — renderBootArt styles each line as a whole).
+// Every glyph cell is doubled horizontally ("██"/"  ") since a terminal
+// cell is roughly twice as tall as it is wide — a 1:1 glyph would come
+// out looking thin and squashed rather than square. An unrecognized rune
+// (anything outside bootArtGlyphs) is silently skipped rather than
+// erroring, since this is only ever fed the hardcoded word above.
+func bootArtLines(word string) []string {
+	lines := make([]string, 5)
+	for _, r := range word {
+		glyph, ok := bootArtGlyphs[r]
+		if !ok {
+			continue
+		}
+		for row := range 5 {
+			for _, cell := range glyph[row] {
+				if cell == '#' {
+					lines[row] += "██"
+				} else {
+					lines[row] += "  "
+				}
+			}
+			lines[row] += "  " // gap before the next letter
+		}
 	}
+	return lines
+}
 
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		title, "", tagline, "", rule, "", lipgloss.JoinVertical(lipgloss.Left, rows...))
+// renderBootArt draws the boot banner: bootArtWord in block letters,
+// centered, printed once as the transcript's first entry. No border or
+// panel — just the art on the app's ordinary background.
+func renderBootArt(s theme.Styles, width int) string {
+	lines := bootArtLines(bootArtWord)
+	styled := make([]string, len(lines))
+	for i, line := range lines {
+		styled[i] = s.BootArt.Render(line)
+	}
+	art := lipgloss.JoinVertical(lipgloss.Left, styled...)
 
-	box := s.BootBorder.Render(content)
-	// Centered rather than flush left — it's meant to read as a one-time
-	// splash card, visually distinct from the left-aligned chat log below
-	// it once the conversation gets going. WithWhitespaceBackground so the
-	// margin PlaceHorizontal adds on either side carries the app's
-	// background instead of the terminal's raw default — this content
-	// already sits at its full target width by the time it reaches
-	// App.viewport, so viewport.Style's own per-line repaint (see
-	// App.layout/applyTheme) never gets a chance to add that padding
-	// itself.
 	whitespace := lipgloss.NewStyle().Background(lipgloss.Color(s.Theme.Background))
-	return lipgloss.PlaceHorizontal(width, lipgloss.Center, box, lipgloss.WithWhitespaceStyle(whitespace))
-}
-
-// bootRow renders one "label   value" line, the label at its natural
-// width and the value stretched to fill the rest — same technique used
-// for the /command suggestion rows.
-func bootRow(s theme.Styles, label string, valueStyle lipgloss.Style, value string, width int) string {
-	left := s.BootLabel.Render(fmt.Sprintf("%-13s", label))
-	right := valueStyle.Width(max(width-lipgloss.Width(left), 0)).Render(value)
-	return left + right
-}
-
-func bootSpecialistsRow(s theme.Styles, names []string, width int) string {
-	value := "none — see ~/.tui-testing/subagents"
-	style := s.BootValue
-	if len(names) > 0 {
-		value = strings.Join(names, ", ")
-	}
-	return bootRow(s, "specialists", style, value, width)
-}
-
-func orPlaceholder(s, placeholder string) string {
-	if s == "" {
-		return placeholder
-	}
-	return s
+	return lipgloss.PlaceHorizontal(width, lipgloss.Center, art, lipgloss.WithWhitespaceStyle(whitespace))
 }
