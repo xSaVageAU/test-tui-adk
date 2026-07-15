@@ -8,9 +8,6 @@ import "charm.land/lipgloss/v2"
 type Styles struct {
 	Theme Theme
 
-	// App chrome
-	App lipgloss.Style
-
 	// Top bar: a plain (no background panel) meta line (just the session
 	// id — see header.go's renderTopBar) plus a solid rule separating it
 	// from the chat below. HeaderSession carries a background — a
@@ -166,31 +163,18 @@ const (
 func New(t Theme) Styles {
 	s := Styles{Theme: t}
 
-	s.App = lipgloss.NewStyle().
-		Background(lipgloss.Color(t.Background)).
-		Foreground(lipgloss.Color(t.Text))
-
 	s.Header = lipgloss.NewStyle().
-		Background(lipgloss.Color(t.Background)).
 		Foreground(lipgloss.Color(t.TextMuted)).
 		Padding(0, 1)
 
 	s.HeaderRule = lipgloss.NewStyle().
-		Background(lipgloss.Color(t.Background)).
 		Foreground(lipgloss.Color(t.Border))
 
 	// HeaderTitle also backs every plain connector fragment inside a
 	// composite line built by concatenating several separately-rendered
 	// styles side by side (the top bar's meta/context-bar gap — see
-	// header.go's joinLeftRight — and HelpBadgeStyle's own gaps). Giving
-	// it an explicit Background matters more here than almost anywhere
-	// else: wrapping an *already-rendered* composite string in one more
-	// outer background afterward does not work — each fragment's own
-	// trailing reset code cuts off anything after it in the same
-	// Render() call, so a background has to be set on every individual
-	// fragment, not just the thing that joins them.
+	// header.go's joinLeftRight — and HelpBadgeStyle's own gaps).
 	s.HeaderTitle = lipgloss.NewStyle().
-		Background(lipgloss.Color(t.Background)).
 		Foreground(lipgloss.Color(t.TextFaint))
 
 	s.HeaderSession = lipgloss.NewStyle().
@@ -212,11 +196,7 @@ func New(t Theme) Styles {
 	}
 
 	s.HeaderContextBar = func(frac float64) lipgloss.Style {
-		// Background matters here specifically because "░" (the bar's
-		// empty portion) is a partial-coverage glyph — its own gaps would
-		// otherwise show the terminal's raw background instead of ours,
-		// unlike "█" which fills its whole cell regardless.
-		base := lipgloss.NewStyle().Background(lipgloss.Color(t.Background))
+		base := lipgloss.NewStyle()
 		switch {
 		case frac >= 0.9:
 			return base.Foreground(lipgloss.Color(t.Error))
@@ -228,27 +208,19 @@ func New(t Theme) Styles {
 	}
 
 	// Viewport is applied directly to the bubbles/viewport.Model itself
-	// (see App.layout/applyTheme), not composed here like everything
-	// else — it's what makes the chat area's own internal blank-fill
-	// rows (shorter transcripts than the viewport's height) carry the
-	// background instead of showing the terminal's raw default below the
-	// last message.
+	// (see App.layout/applyTheme), not composed here like everything else.
 	s.Viewport = lipgloss.NewStyle().
-		Background(lipgloss.Color(t.Background)).
 		Foreground(lipgloss.Color(t.Text))
 
 	s.MessageUser = lipgloss.NewStyle().
-		Background(lipgloss.Color(t.Background)).
 		Foreground(lipgloss.Color(t.Accent)).
 		Bold(true)
 
 	s.MessageAgent = lipgloss.NewStyle().
-		Background(lipgloss.Color(t.Background)).
 		Foreground(lipgloss.Color(t.TextMuted)).
 		Bold(true)
 
 	s.MessageSystem = lipgloss.NewStyle().
-		Background(lipgloss.Color(t.Background)).
 		Foreground(lipgloss.Color(t.TextFaint)).
 		Italic(true)
 
@@ -265,16 +237,13 @@ func New(t Theme) Styles {
 		Padding(0, 1)
 
 	s.ReasoningNote = lipgloss.NewStyle().
-		Background(lipgloss.Color(t.Background)).
 		Foreground(lipgloss.Color(t.TextFaint))
 
 	s.ReasoningText = lipgloss.NewStyle().
-		Background(lipgloss.Color(t.Background)).
 		Foreground(lipgloss.Color(t.TextFaint)).
 		Italic(true)
 
 	s.MessageContent = lipgloss.NewStyle().
-		Background(lipgloss.Color(t.Background)).
 		Foreground(lipgloss.Color(t.Text))
 
 	s.MessageUserBubble = lipgloss.NewStyle().
@@ -283,16 +252,13 @@ func New(t Theme) Styles {
 		Padding(0, 1)
 
 	s.MessageFinishWarning = lipgloss.NewStyle().
-		Background(lipgloss.Color(t.Background)).
 		Foreground(lipgloss.Color(t.Warning))
 
 	s.MessageFinishBlocked = lipgloss.NewStyle().
-		Background(lipgloss.Color(t.Background)).
 		Foreground(lipgloss.Color(t.Error)).
 		Bold(true)
 
 	s.ToolGutter = lipgloss.NewStyle().
-		Background(lipgloss.Color(t.Background)).
 		Foreground(lipgloss.Color(t.Attention))
 
 	s.ToolCallName = lipgloss.NewStyle().
@@ -302,11 +268,9 @@ func New(t Theme) Styles {
 		Padding(0, 1)
 
 	s.ToolCallArgs = lipgloss.NewStyle().
-		Background(lipgloss.Color(t.Background)).
 		Foreground(lipgloss.Color(t.TextMuted))
 
 	s.ToolResult = lipgloss.NewStyle().
-		Background(lipgloss.Color(t.Background)).
 		Foreground(lipgloss.Color(t.TextFaint))
 
 	s.ToolConfirmPending = lipgloss.NewStyle().
@@ -315,11 +279,9 @@ func New(t Theme) Styles {
 		Bold(true)
 
 	s.ToolConfirmApproved = lipgloss.NewStyle().
-		Background(lipgloss.Color(t.Background)).
 		Foreground(lipgloss.Color(t.Success))
 
 	s.ToolConfirmDenied = lipgloss.NewStyle().
-		Background(lipgloss.Color(t.Background)).
 		Foreground(lipgloss.Color(t.Error))
 
 	s.StickyPrompt = lipgloss.NewStyle().
@@ -343,14 +305,12 @@ func New(t Theme) Styles {
 	s.InputBar = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(t.Border)).
-		BorderBackground(lipgloss.Color(t.Background)).
 		Background(lipgloss.Color(t.Surface)).
 		Padding(0, 1)
 
 	s.InputBarFocused = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(t.BorderFocus)).
-		BorderBackground(lipgloss.Color(t.Background)).
 		Background(lipgloss.Color(t.Surface)).
 		Padding(0, 1)
 
@@ -366,7 +326,6 @@ func New(t Theme) Styles {
 	s.PaletteBorder = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(t.BorderFocus)).
-		BorderBackground(lipgloss.Color(t.Background)).
 		Background(lipgloss.Color(t.Surface)).
 		Padding(1, 2)
 
@@ -395,7 +354,6 @@ func New(t Theme) Styles {
 	s.Suggestions = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(t.Border)).
-		BorderBackground(lipgloss.Color(t.Background)).
 		Background(lipgloss.Color(t.Surface)).
 		Padding(0, 1)
 
