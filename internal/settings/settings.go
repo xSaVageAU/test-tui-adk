@@ -73,6 +73,12 @@ type UISettings struct {
 	// settings.json free of two keys nobody's ever edited.
 	PopupWidth  int `json:"popupWidth,omitempty"`
 	PopupHeight int `json:"popupHeight,omitempty"`
+	// ToolPreviewMaxLines caps how many lines of a tool's content (
+	// read_file's result, write_file's written content) verbose mode
+	// shows before truncating — see internal/ui/toolformat.go's
+	// toolPreviewMaxLinesDefault. 0 means "unset", falling back to that
+	// default.
+	ToolPreviewMaxLines int `json:"toolPreviewMaxLines,omitempty"`
 }
 
 // ModeNormal/ModeFullAuto are PermissionMode's only two valid values —

@@ -235,6 +235,14 @@ type App struct {
 	// paletteWidth/paletteHeight/textPopupWidth.
 	popupWidth  int
 	popupHeight int
+
+	// toolPreviewMaxLines is /settings' "Tool output preview lines"
+	// override — 0 means unset (use toolPreviewMaxLinesDefault, see
+	// commands.go's effectiveToolPreviewMaxLines). Caps how much of a
+	// tool's content (read_file's result, write_file's written content)
+	// verbose mode shows before truncating — see toolformat.go's
+	// formatToolResult.
+	toolPreviewMaxLines int
 }
 
 // AppConfig bundles NewApp's startup inputs. Grew past the point where a
@@ -304,26 +312,27 @@ func NewApp(cfg AppConfig) *App {
 			Theme:       mgr.Current().Name,
 			Specialists: cfg.Specialists,
 		},
-		contextWindow:    cfg.ContextWindow,
-		status:           theme.StatusIdle,
-		highlightUser:    uiSettings.HighlightUser,
-		streamReplies:    uiSettings.StreamReplies,
-		verboseTools:     uiSettings.VerboseTools,
-		showReasoning:    !uiSettings.HideReasoningText,
-		popupWidth:       uiSettings.PopupWidth,
-		popupHeight:      uiSettings.PopupHeight,
-		hitlMode:         parseHITLMode(uiSettings.HITLMode),
-		permissionMode:   parsePermissionMode(uiSettings.PermissionMode),
-		inputLines:       minInputLines,
-		messages:         messages,
-		input:            newInput(styles),
-		listAgents:       cfg.ListAgents,
-		setAgentProvider: cfg.SetAgentProvider,
-		setAgentModel:    cfg.SetAgentModel,
-		setAgentTools:    cfg.SetAgentTools,
-		listTools:        cfg.ListTools,
-		workingAnim:      newWorkingAnimState(parseWorkingAnimVariant(uiSettings.WorkingAnim)),
-		workingLabel:     "thinking",
+		contextWindow:       cfg.ContextWindow,
+		status:              theme.StatusIdle,
+		highlightUser:       uiSettings.HighlightUser,
+		streamReplies:       uiSettings.StreamReplies,
+		verboseTools:        uiSettings.VerboseTools,
+		showReasoning:       !uiSettings.HideReasoningText,
+		popupWidth:          uiSettings.PopupWidth,
+		popupHeight:         uiSettings.PopupHeight,
+		toolPreviewMaxLines: uiSettings.ToolPreviewMaxLines,
+		hitlMode:            parseHITLMode(uiSettings.HITLMode),
+		permissionMode:      parsePermissionMode(uiSettings.PermissionMode),
+		inputLines:          minInputLines,
+		messages:            messages,
+		input:               newInput(styles),
+		listAgents:          cfg.ListAgents,
+		setAgentProvider:    cfg.SetAgentProvider,
+		setAgentModel:       cfg.SetAgentModel,
+		setAgentTools:       cfg.SetAgentTools,
+		listTools:           cfg.ListTools,
+		workingAnim:         newWorkingAnimState(parseWorkingAnimVariant(uiSettings.WorkingAnim)),
+		workingLabel:        "thinking",
 	}
 	return a
 }

@@ -163,8 +163,19 @@ func (a *App) openSettingsMenu() {
 		{id: "reasoning", title: "Show reasoning text", desc: onOff(a.showReasoning)},
 		{id: "popupWidth", title: "Popup width", desc: fmt.Sprintf("%d — select to edit", a.effectivePopupWidth())},
 		{id: "popupHeight", title: "Popup height", desc: fmt.Sprintf("%d — select to edit", a.effectivePopupHeight())},
+		{id: "toolPreviewLines", title: "Tool output preview lines", desc: fmt.Sprintf("%d — select to edit", a.effectiveToolPreviewMaxLines())},
 	}
 	a.openMenu(paletteSettings, "Settings", items)
+}
+
+// effectiveToolPreviewMaxLines is verbose tool output's actual line
+// cap: the configured override if /settings' "Tool output preview
+// lines" has been set, else toolPreviewMaxLinesDefault.
+func (a *App) effectiveToolPreviewMaxLines() int {
+	if a.toolPreviewMaxLines > 0 {
+		return a.toolPreviewMaxLines
+	}
+	return toolPreviewMaxLinesDefault
 }
 
 func onOff(v bool) string {
@@ -226,6 +237,10 @@ func (a *App) confirmMenuSelection(id string) (bool, tea.Cmd) {
 			a.pushMenuBack(func() tea.Cmd { a.openSettingsMenu(); return nil })
 			a.openPopupSizeInput(textPopupPopupHeight, "Set popup height", a.effectivePopupHeight())
 			return false, nil
+		case "toolPreviewLines":
+			a.pushMenuBack(func() tea.Cmd { a.openSettingsMenu(); return nil })
+			a.openPopupSizeInput(textPopupToolPreviewLines, "Set tool output preview lines", a.effectiveToolPreviewMaxLines())
+			return false, nil
 		default:
 			a.toggleSetting(id)
 		}
@@ -281,25 +296,26 @@ func (a *App) toggleSetting(id string) {
 	a.refreshTranscript()
 }
 
-// submitPopupSize is Enter's handler for /settings' "Popup width"/"Popup
-// height" fields (textPopupPopupWidth/textPopupPopupHeight) — parses the
-// typed value, clamps it into the popup{Width,Height}{Min,Max} range, and
-// persists it. A non-numeric entry is reported and left unchanged rather
-// than silently falling back to something the user didn't type.
-func (a *App) submitPopupSize() tea.Cmd {
+// submitNumericSetting is Enter's handler for every /settings numeric
+// text field (textPopupPopupWidth/textPopupPopupHeight/
+// textPopupToolPreviewLines) — parses the typed value, clamps it into
+// that field's own min/max range, and persists it. A non-numeric entry
+// is reported and left unchanged rather than silently falling back to
+// something the user didn't type.
+func (a *App) submitNumericSetting() tea.Cmd {
 	raw := strings.TrimSpace(a.keyInput.Value())
 	kind := a.textPopupKind
 
 	n, err := strconv.Atoi(raw)
 	if err != nil {
-		a.systemMessage("Not a number — popup size left unchanged.")
+		a.systemMessage("Not a number — setting left unchanged.")
 		return a.backOrClose(a.closeMenuCmd)
 	}
 
 	// Applied before backOrClose below reopens /settings — that reopen
-	// rebuilds its rows from a.effectivePopupWidth/Height right now, so
-	// the value has to already be live or the row we just edited would
-	// flash the old number for one frame.
+	// rebuilds its rows from the current value right now, so it has to
+	// already be live or the row we just edited would flash the old
+	// number for one frame.
 	switch kind {
 	case textPopupPopupWidth:
 		a.popupWidth = clampInt(n, popupWidthMin, popupWidthMax)
@@ -307,6 +323,13 @@ func (a *App) submitPopupSize() tea.Cmd {
 	case textPopupPopupHeight:
 		a.popupHeight = clampInt(n, popupHeightMin, popupHeightMax)
 		a.systemMessage(fmt.Sprintf("Popup height set to %d.", a.popupHeight))
+	case textPopupToolPreviewLines:
+		a.toolPreviewMaxLines = clampInt(n, toolPreviewMaxLinesMin, toolPreviewMaxLinesMax)
+		a.systemMessage(fmt.Sprintf("Tool output preview lines set to %d.", a.toolPreviewMaxLines))
+		// Unlike popup width/height, this affects transcript rendering
+		// directly (verbose tool-output blocks), so re-render now rather
+		// than waiting for the next unrelated refresh to pick it up.
+		a.refreshTranscript()
 	}
 	a.persistSettings()
 	return a.backOrClose(a.closeMenuCmd)
@@ -329,15 +352,16 @@ func clampInt(n, lo, hi int) int {
 func (a *App) persistSettings() {
 	s := settings.Load()
 	s.UI = settings.UISettings{
-		HighlightUser:     a.highlightUser,
-		StreamReplies:     a.streamReplies,
-		HITLMode:          a.hitlMode.String(),
-		PermissionMode:    a.permissionMode.String(),
-		VerboseTools:      a.verboseTools,
-		WorkingAnim:       workingAnimNames[a.workingAnim.variant],
-		HideReasoningText: !a.showReasoning,
-		PopupWidth:        a.popupWidth,
-		PopupHeight:       a.popupHeight,
+		HighlightUser:       a.highlightUser,
+		StreamReplies:       a.streamReplies,
+		HITLMode:            a.hitlMode.String(),
+		PermissionMode:      a.permissionMode.String(),
+		VerboseTools:        a.verboseTools,
+		WorkingAnim:         workingAnimNames[a.workingAnim.variant],
+		HideReasoningText:   !a.showReasoning,
+		PopupWidth:          a.popupWidth,
+		PopupHeight:         a.popupHeight,
+		ToolPreviewMaxLines: a.toolPreviewMaxLines,
 	}
 	_ = settings.Save(s)
 }

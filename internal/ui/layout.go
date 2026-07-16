@@ -23,7 +23,7 @@ const (
 // effectivePopupWidth/effectivePopupHeight) — the exact values this app
 // shipped with before that setting existed, so an untouched install looks
 // unchanged. popup{Width,Height}{Min,Max} bound what a typed value in
-// that setting's text field is clamped to (see submitPopupSize in
+// that setting's text field is clamped to (see submitNumericSetting in
 // commands.go) — floors keep a popup legible, ceilings keep a typo like
 // an extra zero from being taken literally.
 const (

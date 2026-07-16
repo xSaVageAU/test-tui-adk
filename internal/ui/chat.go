@@ -20,7 +20,7 @@ import (
 // at, so PgUp/PgDn can jump viewport.YOffset straight to a prompt instead
 // of scrolling a fixed page height — cheap to compute here alongside the
 // render pass instead of re-walking the content separately.
-func renderTranscript(s theme.Styles, messages []ChatMessage, width int, highlightUser, verboseTools, showReasoning bool) (content string, userMsgLines []int) {
+func renderTranscript(s theme.Styles, messages []ChatMessage, width int, highlightUser, verboseTools, showReasoning bool, maxPreviewLines int) (content string, userMsgLines []int) {
 	var sb strings.Builder
 	bootBlock := renderBootArt(s, width)
 	sb.WriteString(bootBlock)
@@ -49,7 +49,7 @@ func renderTranscript(s theme.Styles, messages []ChatMessage, width int, highlig
 		writeBlock(s.MessageSystem.Render("No messages yet — say something below."), false)
 	} else {
 		for _, m := range messages {
-			startLine := writeBlock(renderMessage(s, m, width, highlightUser, verboseTools, showReasoning), false)
+			startLine := writeBlock(renderMessage(s, m, width, highlightUser, verboseTools, showReasoning, maxPreviewLines), false)
 			if m.Role == RoleUser {
 				userMsgLines = append(userMsgLines, startLine)
 			}
@@ -58,7 +58,7 @@ func renderTranscript(s theme.Styles, messages []ChatMessage, width int, highlig
 	return sb.String(), userMsgLines
 }
 
-func renderMessage(s theme.Styles, m ChatMessage, width int, highlightUser, verboseTools, showReasoning bool) string {
+func renderMessage(s theme.Styles, m ChatMessage, width int, highlightUser, verboseTools, showReasoning bool, maxPreviewLines int) string {
 	switch m.Role {
 	case RoleUser:
 		label := s.MessageUser.Render("you")
@@ -92,7 +92,7 @@ func renderMessage(s theme.Styles, m ChatMessage, width int, highlightUser, verb
 		}
 		return lipgloss.JoinVertical(lipgloss.Left, lines...)
 	case RoleTool:
-		return renderTool(s, m.ToolName, m.ToolArgs, m.ToolResult, m.ToolStatus, m.ToolPending, verboseTools, width)
+		return renderTool(s, m.ToolName, m.ToolArgs, m.ToolResult, m.ToolStatus, m.ToolPending, verboseTools, width, maxPreviewLines)
 	default:
 		return s.MessageEvent.Render(m.Content)
 	}
@@ -132,15 +132,15 @@ const toolGutter = "▏ "
 // was that plain colored text blended in too easily to notice a
 // conversation was blocked waiting on a decision, and that's still true
 // whether or not the rest of this entry is lean.
-func renderTool(s theme.Styles, name string, args, result map[string]any, status string, pending, verboseTools bool, width int) string {
+func renderTool(s theme.Styles, name string, args, result map[string]any, status string, pending, verboseTools bool, width, maxPreviewLines int) string {
 	callLine := s.ToolGutter.Render(toolGutter) + s.ToolCallName.Render(name)
-	if argsText := formatToolArgs(name, args, verboseTools); argsText != "" {
+	if argsText := formatToolArgs(name, args); argsText != "" {
 		callLine += s.ToolCallArgs.Render("  " + argsText)
 	}
 
 	switch {
 	case result != nil:
-		text := formatToolResult(name, result, verboseTools)
+		text := formatToolResult(name, args, result, verboseTools, maxPreviewLines)
 		if !verboseTools {
 			return callLine + s.MessageContent.Render("  ") + s.ToolResult.Render(text)
 		}

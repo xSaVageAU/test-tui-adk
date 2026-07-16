@@ -55,22 +55,23 @@ func summarizeResult(result map[string]any) string {
 // shows its target path regardless of verboseTools — there's nothing
 // else on its call line worth showing either way, and the directory
 // being listed is exactly the thing you'd want to know at a glance, not
-// something worth hiding behind a toggle. read_file/write_file show just
-// the path in lean mode (dropping write_file's content argument entirely
-// rather than the truncated-but-still-noisy preview formatKV would
-// otherwise show); verbose falls back to the generic formatKV, same as
-// an unrecognized tool name gets in either mode.
-func formatToolArgs(name string, args map[string]any, verbose bool) string {
-	if name == "list_files" {
+// something worth hiding behind a toggle. read_file/write_file show
+// just the path in *both* modes — write_file's content argument in
+// particular has nowhere good to go on a single call line (it used to
+// fall back to formatKV's generic "key=value" preview, truncated to
+// maxArgValuePreview chars — exactly the "content=blah blah… (N chars)"
+// dead end this was replaced for); the actual content is shown as its
+// own wrapped block instead, the same way read_file's result already
+// was — see formatToolResult's write_file case. Anything unrecognized
+// falls back to the generic formatKV in either mode.
+func formatToolArgs(name string, args map[string]any) string {
+	switch name {
+	case "list_files":
 		if path, ok := args["path"].(string); ok && path != "" {
 			return path
 		}
 		return "." // listFiles' own default when no path is given
-	}
-	if verbose {
-		return formatKV(args)
-	}
-	if name == "read_file" || name == "write_file" {
+	case "read_file", "write_file":
 		if path, ok := args["path"].(string); ok && path != "" {
 			return path
 		}
@@ -78,35 +79,45 @@ func formatToolArgs(name string, args map[string]any, verbose bool) string {
 	return formatKV(args)
 }
 
-// readFilePreviewMaxLines caps how much of a file's content verbose mode
-// actually prints — verbose means "more than the lean one-liner," not
-// "however many thousand lines the file happens to have."
-const readFilePreviewMaxLines = 50
+// toolPreviewMaxLinesDefault caps how many lines of a tool's content
+// verbose mode actually prints until /settings' "Tool output preview
+// lines" is explicitly set (see App.effectiveToolPreviewMaxLines) — verbose
+// means "more than the lean one-liner," not "however many thousand
+// lines the file happens to have." toolPreviewMaxLines{Min,Max} bound
+// what a typed value in that setting's text field is clamped to.
+const (
+	toolPreviewMaxLinesDefault = 25
+	toolPreviewMaxLinesMin     = 5
+	toolPreviewMaxLinesMax     = 500
+)
 
 // formatToolResult is renderTool's status-line formatter. For this
 // app's own three built-in tools, lean and verbose deliberately show
 // categorically different things rather than the same information at
 // two lengths: lean is always a bare count/size (no file names, no file
 // content, no exception for a short list that would technically still
-// fit), verbose is the actual content/listing. Falls back to the
-// generic summarizeResult both for an unrecognized tool and for
-// whichever piece a recognized tool's result doesn't match (e.g.
-// write_file has nothing more to say in verbose mode than lean already
-// shows, just formatted generically instead).
-func formatToolResult(name string, result map[string]any, verbose bool) string {
+// fit), verbose is the actual content/listing, capped at
+// maxPreviewLines. write_file's content comes from args, not result —
+// the call only ever gets bytesWritten back — so this is the one case
+// that reads args instead of result; every other tool ignores it. Falls
+// back to the generic summarizeResult both for an unrecognized tool and
+// for whichever piece a recognized tool's result doesn't match.
+func formatToolResult(name string, args, result map[string]any, verbose bool, maxPreviewLines int) string {
 	switch name {
 	case "read_file":
 		if content, ok := result["content"].(string); ok {
 			if !verbose {
 				return "read " + humanBytes(len(content))
 			}
-			return truncateLines(content, readFilePreviewMaxLines)
+			return truncateLines(content, maxPreviewLines)
 		}
 	case "write_file":
 		if !verbose {
 			if n, ok := intFromAny(result["bytesWritten"]); ok {
 				return "wrote " + humanBytes(n)
 			}
+		} else if content, ok := args["content"].(string); ok {
+			return truncateLines(content, maxPreviewLines)
 		}
 	case "list_files":
 		if files, ok := result["files"].([]any); ok && !verbose {

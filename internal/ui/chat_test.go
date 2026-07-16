@@ -15,7 +15,13 @@ import (
 // here) that build+vet can't catch, unlike routine wiring elsewhere in
 // this package.
 
-func TestFormatToolArgsLean(t *testing.T) {
+// TestFormatToolArgs covers the call-line formatter — no lean/verbose
+// axis here any more: read_file/write_file/list_files always show just
+// their path (write_file's content argument in particular never belongs
+// on the single call line — see formatToolResult's write_file case for
+// where it actually shows up), and an unrecognized tool always falls
+// back to the generic formatKV.
+func TestFormatToolArgs(t *testing.T) {
 	cases := []struct {
 		name string
 		args map[string]any
@@ -29,51 +35,25 @@ func TestFormatToolArgsLean(t *testing.T) {
 		{"research", map[string]any{"request": "what does this do"}, "request=what does this do"},
 	}
 	for _, c := range cases {
-		if got := formatToolArgs(c.name, c.args, false); got != c.want {
-			t.Errorf("formatToolArgs(%q, %v, false) = %q, want %q", c.name, c.args, got, c.want)
-		}
-	}
-}
-
-func TestFormatToolArgsVerboseMatchesFormatKV(t *testing.T) {
-	args := map[string]any{"path": "foo.txt", "content": "hello"}
-	got := formatToolArgs("write_file", args, true)
-	want := formatKV(args)
-	if got != want {
-		t.Errorf("verbose formatToolArgs = %q, want formatKV's %q", got, want)
-	}
-}
-
-// TestFormatToolArgsListFilesAlwaysShowsPath guards the one place
-// formatToolArgs deliberately ignores the verbose flag: list_files'
-// target directory is the whole point of the call, so it should never
-// disappear just because verbose mode would otherwise defer to
-// formatKV(args) — which renders "" for an empty args map (the common
-// case: a model calling list_files with no explicit path at all).
-func TestFormatToolArgsListFilesAlwaysShowsPath(t *testing.T) {
-	for _, verbose := range []bool{false, true} {
-		if got := formatToolArgs("list_files", map[string]any{"path": "src"}, verbose); got != "src" {
-			t.Errorf("verbose=%v: got %q, want %q", verbose, got, "src")
-		}
-		if got := formatToolArgs("list_files", map[string]any{}, verbose); got != "." {
-			t.Errorf("verbose=%v: got %q, want %q", verbose, got, ".")
+		if got := formatToolArgs(c.name, c.args); got != c.want {
+			t.Errorf("formatToolArgs(%q, %v) = %q, want %q", c.name, c.args, got, c.want)
 		}
 	}
 }
 
 func TestFormatToolResultLean(t *testing.T) {
-	if got := formatToolResult("read_file", map[string]any{"content": "12345"}, false); got != "read 5 bytes" {
+	if got := formatToolResult("read_file", nil, map[string]any{"content": "12345"}, false, toolPreviewMaxLinesDefault); got != "read 5 bytes" {
 		t.Errorf("read_file result = %q, want %q", got, "read 5 bytes")
 	}
 
 	// bytesWritten as a plain Go int (the handler's own return type).
-	if got := formatToolResult("write_file", map[string]any{"bytesWritten": 2048}, false); got != "wrote 2.0 KB" {
+	if got := formatToolResult("write_file", nil, map[string]any{"bytesWritten": 2048}, false, toolPreviewMaxLinesDefault); got != "wrote 2.0 KB" {
 		t.Errorf("write_file (int) result = %q, want %q", got, "wrote 2.0 KB")
 	}
 	// bytesWritten as float64 — what a JSON decode step would produce;
 	// covering both is the actual point of this test, since it's not
 	// certain from here which one ADK's event pipeline hands back.
-	if got := formatToolResult("write_file", map[string]any{"bytesWritten": float64(2048)}, false); got != "wrote 2.0 KB" {
+	if got := formatToolResult("write_file", nil, map[string]any{"bytesWritten": float64(2048)}, false, toolPreviewMaxLinesDefault); got != "wrote 2.0 KB" {
 		t.Errorf("write_file (float64) result = %q, want %q", got, "wrote 2.0 KB")
 	}
 
@@ -82,8 +62,21 @@ func TestFormatToolResultLean(t *testing.T) {
 	// since "verbose only changes the count's label" was exactly the
 	// confusing middle ground this replaced.
 	short := map[string]any{"files": []any{"a.go", "b.go"}}
-	if got := formatToolResult("list_files", short, false); got != "2 entries" {
+	if got := formatToolResult("list_files", nil, short, false, toolPreviewMaxLinesDefault); got != "2 entries" {
 		t.Errorf("list_files (short) result = %q, want %q", got, "2 entries")
+	}
+}
+
+// TestFormatToolResultWriteFileVerboseShowsContent is write_file's
+// counterpart to read_file's verbose preview: the actual written text
+// comes from args (the call only ever gets bytesWritten back in
+// result), truncated the same way and to the same cap.
+func TestFormatToolResultWriteFileVerboseShowsContent(t *testing.T) {
+	args := map[string]any{"path": "foo.txt", "content": "line one\nline two"}
+	result := map[string]any{"bytesWritten": 17}
+	got := formatToolResult("write_file", args, result, true, toolPreviewMaxLinesDefault)
+	if got != "line one\nline two" {
+		t.Errorf("write_file verbose result = %q, want the written content", got)
 	}
 }
 
@@ -93,40 +86,44 @@ func TestFormatToolResultLean(t *testing.T) {
 // different wording.
 func TestFormatToolResultListFilesVerboseShowsNames(t *testing.T) {
 	result := map[string]any{"files": []any{"a.go", "b.go"}}
-	got := formatToolResult("list_files", result, true)
+	got := formatToolResult("list_files", nil, result, true, toolPreviewMaxLinesDefault)
 	want := summarizeResult(result)
 	if got != want || got == "2 entries" {
 		t.Errorf("list_files verbose = %q, want the full listing (%q)", got, want)
 	}
 }
 
-// TestFormatToolResultReadFileVerboseTruncates covers the 50-line cap:
-// even verbose mode — "show more" — has a ceiling, so a huge file can't
-// flood the transcript no matter what setting is on.
-func TestFormatToolResultReadFileVerboseTruncates(t *testing.T) {
+// TestFormatToolResultVerboseTruncatesAtConfiguredCap covers the
+// configurable-line-cap behavior — the same truncateLines mechanism
+// read_file and write_file's verbose preview both use — with an
+// explicit cap rather than toolPreviewMaxLinesDefault, so this test's
+// own expected numbers stay self-consistent regardless of what that
+// default happens to be.
+func TestFormatToolResultVerboseTruncatesAtConfiguredCap(t *testing.T) {
+	const maxLines = 50
 	lines := make([]string, 80)
 	for i := range lines {
 		lines[i] = "line"
 	}
 	content := strings.Join(lines, "\n")
-	got := formatToolResult("read_file", map[string]any{"content": content}, true)
+	got := formatToolResult("read_file", nil, map[string]any{"content": content}, true, maxLines)
 	gotLines := strings.Split(got, "\n")
-	if len(gotLines) != readFilePreviewMaxLines+1 { // +1 for the "… (N more lines)" note
-		t.Fatalf("got %d lines, want %d (cap) + 1 (note); output:\n%s", len(gotLines), readFilePreviewMaxLines, got)
+	if len(gotLines) != maxLines+1 { // +1 for the "… (N more lines)" note
+		t.Fatalf("got %d lines, want %d (cap) + 1 (note); output:\n%s", len(gotLines), maxLines, got)
 	}
-	if gotLines[readFilePreviewMaxLines] != "… (30 more lines)" {
-		t.Errorf("last line = %q, want the truncation note", gotLines[readFilePreviewMaxLines])
+	if gotLines[maxLines] != "… (30 more lines)" {
+		t.Errorf("last line = %q, want the truncation note", gotLines[maxLines])
 	}
 
 	short := strings.Join(lines[:10], "\n")
-	if got := formatToolResult("read_file", map[string]any{"content": short}, true); got != short {
+	if got := formatToolResult("read_file", nil, map[string]any{"content": short}, true, maxLines); got != short {
 		t.Errorf("short content should pass through unchanged, got %q", got)
 	}
 }
 
 func TestFormatToolResultVerboseMatchesSummarizeResult(t *testing.T) {
 	result := map[string]any{"content": "the whole file, in full, no matter how long"}
-	got := formatToolResult("read_file", result, true)
+	got := formatToolResult("read_file", nil, result, true, toolPreviewMaxLinesDefault)
 	want := summarizeResult(result)
 	if got != want {
 		t.Errorf("verbose formatToolResult = %q, want summarizeResult's %q", got, want)
@@ -135,8 +132,8 @@ func TestFormatToolResultVerboseMatchesSummarizeResult(t *testing.T) {
 
 func TestFormatToolResultUnrecognizedToolAlwaysGeneric(t *testing.T) {
 	result := map[string]any{"result": "the specialist's full prose answer"}
-	lean := formatToolResult("research", result, false)
-	verbose := formatToolResult("research", result, true)
+	lean := formatToolResult("research", nil, result, false, toolPreviewMaxLinesDefault)
+	verbose := formatToolResult("research", nil, result, true, toolPreviewMaxLinesDefault)
 	if lean != verbose {
 		t.Errorf("lean/verbose diverged for an unrecognized tool: lean=%q verbose=%q", lean, verbose)
 	}

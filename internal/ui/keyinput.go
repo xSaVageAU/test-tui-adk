@@ -24,8 +24,9 @@ const (
 	textPopupNone textPopupKind = iota
 	textPopupAPIKey
 	textPopupAgentModel
-	textPopupPopupWidth  // /settings' "Popup width" field — see openPopupSizeInput/submitPopupSize
-	textPopupPopupHeight // /settings' "Popup height" field
+	textPopupPopupWidth       // /settings' "Popup width" field — see openPopupSizeInput/submitNumericSetting
+	textPopupPopupHeight      // /settings' "Popup height" field
+	textPopupToolPreviewLines // /settings' "Tool output preview lines" field
 )
 
 // providerGemini/providerOpenRouter mirror adk.ProviderGemini/
@@ -85,10 +86,11 @@ func (a *App) openKeyInput(provider string) {
 }
 
 // openPopupSizeInput shows the numeric popup field for /settings' "Popup
-// width"/"Popup height" rows — same text-field popup as /key and /agents'
-// model field, just prefilled with current (the effective size in effect
-// right now) instead of an empty/masked value. See submitPopupSize for
-// where the typed value is parsed, clamped, and persisted.
+// width"/"Popup height"/"Tool output preview lines" rows — same
+// text-field popup as /key and /agents' model field, just prefilled with
+// current (the effective value in effect right now) instead of an
+// empty/masked value. See submitNumericSetting for where the typed
+// value is parsed, clamped, and persisted.
 func (a *App) openPopupSizeInput(kind textPopupKind, label string, current int) {
 	ti := textinput.New()
 	ti.CharLimit = 4
@@ -135,8 +137,8 @@ func (a *App) handleTextInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		switch a.textPopupKind {
 		case textPopupAgentModel:
 			return a, a.submitAgentModel()
-		case textPopupPopupWidth, textPopupPopupHeight:
-			return a, a.submitPopupSize()
+		case textPopupPopupWidth, textPopupPopupHeight, textPopupToolPreviewLines:
+			return a, a.submitNumericSetting()
 		default:
 			return a, a.submitKey()
 		}
