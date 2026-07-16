@@ -145,24 +145,34 @@ func (w *workingAnimState) render(t theme.Theme, width int, label string) string
 	return strings.Join(lines, "\n")
 }
 
-// bgStyle is every glyph style in this file's shared starting point.
-// Most of these animations draw with partial block/braille characters
-// (▁▂▃▄, ⠋⠙⠹, ▬─, ...) which only fill *part* of their cell with the
-// foreground color — without an explicit background, the rest of that
-// cell showed the terminal's raw default instead of the theme's,
-// visible as the "reserved area" looking black while an animation
-// played even though the glyphs themselves were the right color.
+// bgStyle is every glyph style in this file's shared starting point —
+// kept as a single named indirection point (rather than inlining
+// lipgloss.NewStyle() at each of its ~20 call sites) specifically so a
+// background can be reintroduced here in one place if it ever turns out
+// to still be needed, without re-touching every renderX function.
+//
+// No longer sets Background itself: most of these animations draw with
+// partial block/braille characters (▁▂▃▄, ⠋⠙⠹, ▬─, ...) which only fill
+// *part* of their cell with the foreground color, and before the
+// bubbletea v2 migration's OSC background fix, the uncovered rest of
+// that cell fell back to the terminal's raw default instead of the
+// theme's — visible as the "reserved area" looking black while an
+// animation played even though the glyphs themselves were the right
+// color. Post-migration, a cell with no explicit color already shows
+// the theme's background automatically (see app.go's View() doc
+// comment on v.BackgroundColor), so this compensation is redundant now.
 func bgStyle(t theme.Theme) lipgloss.Style {
-	return lipgloss.NewStyle().Background(lipgloss.Color(t.Background))
+	return lipgloss.NewStyle()
 }
 
-// blankAnimLine is one width-wide, background-painted but otherwise
-// empty row — used both by render (padding a short variant up to
-// workingAnimHeight) and blankWorkingAnim (the whole reserved block
-// while idle). A bare "" here would leave the terminal's raw default
-// background showing through instead of the theme's.
+// blankAnimLine is one width-wide, otherwise-empty row — used both by
+// render (padding a short variant up to workingAnimHeight) and
+// blankWorkingAnim (the whole reserved block while idle). Same
+// redundant-compensation reasoning as bgStyle above: Width()'s own
+// padding no longer needs an explicit Background to avoid showing the
+// terminal's raw default.
 func blankAnimLine(t theme.Theme, width int) string {
-	return lipgloss.NewStyle().Background(lipgloss.Color(t.Background)).Width(width).Render("")
+	return lipgloss.NewStyle().Width(width).Render("")
 }
 
 // blankWorkingAnim is what occupies the reserved rows while nothing is

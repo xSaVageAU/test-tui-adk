@@ -55,50 +55,7 @@ func renderTranscript(s theme.Styles, messages []ChatMessage, width int, highlig
 			}
 		}
 	}
-	return padLinesBackground(s.Theme.Background, sb.String(), width), userMsgLines
-}
-
-// padLinesBackground re-wraps every line of content with a background-
-// only style sized to width — the necessary final step after building a
-// transcript out of lipgloss.JoinVertical (used throughout renderMessage
-// for label+content blocks of differing widths): JoinVertical pads
-// shorter lines with a bare, unstyled string (confirmed straight from
-// its own source), so without this, anything shorter than the widest
-// line in its block — the "you"/"agent" label above a wider reply, an
-// event badge on its own line — would show the terminal's raw
-// background trailing after it instead of the theme's.
-//
-// This works where simply wrapping the *whole* transcript in one
-// background style afterward would not: Width()-shortfall padding that
-// *this* style itself generates is always freshly colored, regardless
-// of whatever ANSI reset the line's own pre-existing content left
-// behind — see the styles.go HeaderTitle/HelpBadge doc comments for the
-// same underlying issue in miniature (there, fixed by giving each
-// concatenated fragment its own background instead, since those gaps
-// are mid-line, not trailing).
-func padLinesBackground(bg string, content string, width int) string {
-	style := lipgloss.NewStyle().Background(lipgloss.Color(bg))
-	lines := strings.Split(content, "\n")
-	for i, line := range lines {
-		lines[i] = style.Width(width).Render(line)
-	}
-	return strings.Join(lines, "\n")
-}
-
-// joinLines is lipgloss.JoinVertical(lipgloss.Left, ...) without its
-// width-matching side effect: JoinVertical pads every line shorter than
-// the block's widest one with a bare, unstyled string (confirmed
-// straight from its own source, see padLinesBackground's doc comment) —
-// exactly wrong for a block mixing a short label with a width-padded
-// content line, since that padding would already be "baked in" by the
-// time padLinesBackground's own end-of-pipeline pass sees it, leaving
-// it no shortfall left to (correctly) fill. Every line here is expected
-// to already carry its own background — padLinesBackground handles
-// genuinely short lines; JoinVertical was never needed for equal-width
-// alignment here since nothing in this block relies on being
-// center/right-aligned against the others.
-func joinLines(lines ...string) string {
-	return strings.Join(lines, "\n")
+	return sb.String(), userMsgLines
 }
 
 func renderMessage(s theme.Styles, m ChatMessage, width int, highlightUser, verboseTools, showReasoning bool) string {
@@ -107,10 +64,10 @@ func renderMessage(s theme.Styles, m ChatMessage, width int, highlightUser, verb
 		label := s.MessageUser.Render("you")
 		if !highlightUser {
 			content := s.MessageContent.Width(width).Render(m.Content)
-			return joinLines(label, content)
+			return lipgloss.JoinVertical(lipgloss.Left, label, content)
 		}
 		bubble := s.MessageUserBubble.Width(width - 2).Render(m.Content)
-		return joinLines(label, bubble)
+		return lipgloss.JoinVertical(lipgloss.Left, label, bubble)
 	case RoleAgent:
 		label := s.MessageAgent.Render("agent")
 		if badge := renderReasoningBadge(s, m); badge != "" {
@@ -133,7 +90,7 @@ func renderMessage(s theme.Styles, m ChatMessage, width int, highlightUser, verb
 		if m.FinishReason != "" {
 			lines = append(lines, renderFinishReason(s, m.FinishReason))
 		}
-		return joinLines(lines...)
+		return lipgloss.JoinVertical(lipgloss.Left, lines...)
 	case RoleTool:
 		return renderTool(s, m.ToolName, m.ToolArgs, m.ToolResult, m.ToolStatus, m.ToolPending, verboseTools, width)
 	default:

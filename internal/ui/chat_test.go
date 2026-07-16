@@ -6,8 +6,6 @@ import (
 	"time"
 
 	"tui-testing/internal/theme"
-
-	"charm.land/lipgloss/v2"
 )
 
 // These are pure-function tests, not TUI-driving — formatToolArgs/
@@ -227,38 +225,5 @@ func TestFormatReasoningDuration(t *testing.T) {
 		if got := formatReasoningDuration(c.d); got != c.want {
 			t.Errorf("formatReasoningDuration(%v) = %q, want %q", c.d, got, c.want)
 		}
-	}
-}
-
-// TestPadLinesBackgroundPadsEveryLineToWidth guards the actual
-// background-color fix: every line, including a line shorter than
-// width and a genuinely blank one, must come out at exactly width
-// columns — verified via lipgloss.Width (ANSI-aware), since a
-// shortfall here is exactly what left a line's tail showing the
-// terminal's raw background instead of the theme's.
-func TestPadLinesBackgroundPadsEveryLineToWidth(t *testing.T) {
-	th := theme.Load()[0]
-	content := "short\n\nalready quite a bit longer than the others"
-	got := padLinesBackground(th.Background, content, 40)
-
-	for i, line := range strings.Split(got, "\n") {
-		if w := lipgloss.Width(line); w != 40 {
-			t.Errorf("line %d: width = %d, want 40 (line %q)", i, w, line)
-		}
-	}
-}
-
-// TestJoinLinesDoesNotPad is what makes padLinesBackground's fix
-// actually reach a short line in the first place: lipgloss.JoinVertical
-// pads a shorter line to match a block's widest line using a bare,
-// unstyled string (see padLinesBackground's own doc comment) — baked in
-// *before* padLinesBackground ever runs, leaving it no shortfall left
-// to fill. joinLines must leave each line at its own natural width
-// instead, so the real padding pass downstream has something to do.
-func TestJoinLinesDoesNotPad(t *testing.T) {
-	got := joinLines("you", "a much longer line of message content")
-	lines := strings.Split(got, "\n")
-	if lipgloss.Width(lines[0]) != len("you") {
-		t.Errorf("joinLines padded the short line: %q (width %d)", lines[0], lipgloss.Width(lines[0]))
 	}
 }

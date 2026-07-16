@@ -85,24 +85,6 @@ func renderInputBar(s theme.Styles, ta textarea.Model, width, lines int, focused
 		rows = rows[:lines]
 	}
 
-	// textarea.Model renders through its own internal viewport.Model — a
-	// private field this package has no way to reach — which pads every
-	// row out to its own configured width using a plain, colorless style
-	// before ta.View() ever returns. Since that internal width already
-	// matches this box's content area exactly, box.Width(width) below
-	// finds no shortfall of its own left to (correctly) fill — the
-	// padding's already there, just uncolored. TrimRight strips that raw
-	// trailing padding back off (safe: real ANSI escape codes never
-	// contain a literal space, so this can only ever remove bare
-	// padding, or a run of genuinely-typed trailing spaces — which look
-	// identical either way once repainted) so box's own Width() call has
-	// a real shortfall again, and regenerates it correctly colored — the
-	// same fix as chat.go's padLinesBackground, for the same underlying
-	// reason.
-	for i, row := range rows {
-		rows[i] = strings.TrimRight(row, " ")
-	}
-
 	// Full width, not width-2: box's own border (2) + padding (2) already
 	// account for the 4-column difference from a.input.SetWidth(a.width-4)
 	// — rendering at width-2 here left a 2-column gap of raw terminal
