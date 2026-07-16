@@ -2,18 +2,23 @@
 // components it composes (header, chat viewport, input bar, command
 // palette). Layout and behavior live here; color/style vocabulary lives in
 // internal/theme. Swapping a theme should never require touching this file.
+//
+// This file itself is deliberately just the model's spine — the App
+// struct, its construction, and the three tea.Model methods (Init,
+// Update, View). Everything Update dispatches into lives in its own
+// file by concern: turn.go (sending/streaming/cancelling a turn),
+// keyrouting.go (interpreting a keypress), transcript.go (message/
+// scroll state), layout.go (sizing).
 package ui
 
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 
 	"tui-testing/internal/settings"
 	"tui-testing/internal/theme"
 
-	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/stopwatch"
 	"charm.land/bubbles/v2/textarea"
@@ -22,21 +27,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
-
-// layout constants: the top bar (agent/status/session meta line + rule) is
-// a fixed two-line panel, the input bar is a bordered box (border top/bottom
-// + however many lines the input has currently wrapped to, see
-// App.inputLines), and the help footer is one line. The viewport claims
-// whatever height remains.
-const (
-	topBarHeight = 2
-	footerHeight = 1
-)
-
-// quitConfirmWindow is how long a "ctrl+c again to exit" arming (see
-// App.quitArmedAt) stays live — a second press after this long is
-// treated as a fresh first press instead of the confirmation.
-const quitConfirmWindow = 2 * time.Second
 
 // App is the root tea.Model. It owns global state (theme, size, active
 // agent) and delegates rendering of each region to that region's own
@@ -72,8 +62,8 @@ type App struct {
 	// thinking chunks (StreamChunk.Reasoning) rather than its real reply.
 	// Cleared the moment anything else arrives (real text, a tool call,
 	// the stream ending) since those all mean the reasoning phase is
-	// over — see startReasoning/endReasoning. The reasoning text itself
-	// is received but not rendered anywhere yet — this (plus
+	// over — see turn.go's startReasoning/endReasoning. The reasoning
+	// text itself is received but not rendered anywhere yet — this (plus
 	// ChatMessage.ReasoningActive/ReasoningDuration and reasoningStart/
 	// stopwatch below) is deliberately just the detection/timing half of
 	// a "show reasoning" feature, not the display-the-actual-text half.
@@ -109,50 +99,53 @@ type App struct {
 	confirmDecisions []ConfirmationDecision
 
 	// In-flight stream state, set by streamStartMsg and cleared once the
-	// channel closes or errors — see dispatchToBackend and the
-	// streamChunkMsg handler in Update.
+	// channel closes or errors — see turn.go's dispatchToBackend and the
+	// streamChunkMsg handler below.
 	streamChan        <-chan StreamChunk
 	streamingMsgIndex int
-	toolMsgIndex      map[string]int // tool call ID -> index into messages; see upsertToolMessage
+	toolMsgIndex      map[string]int // tool call ID -> index into messages; see transcript.go's upsertToolMessage
 
 	// turnCancel cancels the context backing whichever Send/Stream/
 	// RespondToConfirmation call is currently in flight, if any — set at
-	// the start of dispatchToBackend and resolveConfirmation's final
-	// batch send, cleared the moment that call's result lands (success,
-	// error, or this same cancellation). ctrl+c calls it (see handleKey/
-	// stopTurn) to stop the agent mid-turn instead of quitting the app;
-	// nil whenever nothing is running, which is also how handleKey tells
-	// "the agent is working" apart from "the main view."
+	// the start of turn.go's dispatchToBackend and resolveConfirmation's
+	// final batch send, cleared the moment that call's result lands
+	// (success, error, or this same cancellation). ctrl+c calls it (see
+	// keyrouting.go's handleKey and turn.go's stopTurn) to stop the agent
+	// mid-turn instead of quitting the app; nil whenever nothing is
+	// running, which is also how handleKey tells "the agent is working"
+	// apart from "the main view."
 	turnCancel context.CancelFunc
 
 	// quitArmedAt is when ctrl+c was last pressed with nothing else for
 	// it to do (no popup open, no turn running) — a second press within
 	// quitConfirmWindow actually quits; any later press, or one while
 	// something else intercepts ctrl+c first, is treated as a fresh
-	// first press instead. See handleKey.
+	// first press instead. See keyrouting.go's handleKey.
 	quitArmedAt time.Time
 
 	// contextWindow is the current model's max input tokens (0 if
 	// unknown), set from Backend.ContextWindow on every successful
 	// (re)connect — see the keySetMsg handler. contextUsed is the most
-	// recently known prompt token count — i.e. accumulateUsage's
-	// turnUsage.Prompt, mirrored here the moment it updates rather than
-	// only once a turn finishes, so the top bar's context-usage
-	// indicator (see header.go's renderContextBar) tracks live during a
-	// multi-call turn instead of jumping only at the end. Persists
-	// across turns (a later turn's prompt only grows on top of history,
-	// same reasoning as turnUsage.Prompt itself) until resetTranscriptState
-	// zeroes it for a genuinely new/switched session.
+	// recently known prompt token count — i.e. turn.go's
+	// accumulateUsage's turnUsage.Prompt, mirrored here the moment it
+	// updates rather than only once a turn finishes, so the top bar's
+	// context-usage indicator (see header.go's renderContextBar) tracks
+	// live during a multi-call turn instead of jumping only at the end.
+	// Persists across turns (a later turn's prompt only grows on top of
+	// history, same reasoning as turnUsage.Prompt itself) until
+	// resetTranscriptState zeroes it for a genuinely new/switched
+	// session.
 	contextWindow int
 	contextUsed   int
 
 	// turnUsage/turnFinishReason accumulate across every model call one
 	// logical turn makes — including across a HITL pause/resume, which
 	// closes and reopens the stream channel but is still the same turn —
-	// until attachTurnFinishReason clears them at the turn's end (see
-	// dispatchToBackend, where these reset at the turn's start).
-	// turnUsage.Prompt is also mirrored live into contextUsed above as it
-	// updates; turnFinishReason lands on the turn's final agent message.
+	// until turn.go's attachTurnFinishReason clears them at the turn's
+	// end (see dispatchToBackend, where these reset at the turn's
+	// start). turnUsage.Prompt is also mirrored live into contextUsed
+	// above as it updates; turnFinishReason lands on the turn's final
+	// agent message.
 	turnUsage        *TokenUsage
 	turnFinishReason string
 
@@ -228,17 +221,17 @@ type App struct {
 	// menuBack is a stack of "how to reopen the menu on screen right now"
 	// closures, pushed whenever a menu opens a nested step (e.g. /agents'
 	// detail page opening Provider/Model/Tools, or /settings opening a
-	// numeric field) — see pushMenuBack/backOrClose in commands.go. Esc and
-	// a terminal selection both pop this before falling back to actually
-	// leaving the popup, so stepping out of a nested menu goes back one
-	// level instead of dropping all the way out to the chat.
+	// numeric field) — see menustack.go's pushMenuBack/backOrClose. Esc
+	// and a terminal selection both pop this before falling back to
+	// actually leaving the popup, so stepping out of a nested menu goes
+	// back one level instead of dropping all the way out to the chat.
 	menuBack []func() tea.Cmd
 
 	// popupWidth/popupHeight are /settings' "Popup width"/"Popup height"
 	// overrides — 0 means unset (use popupWidthDefault/popupHeightDefault,
-	// see effectivePopupWidth/effectivePopupHeight). Every popup modal
-	// (the command palette, /settings, /agents, and the /key and
-	// /agents-model text fields) shares these two values — see
+	// see layout.go's effectivePopupWidth/effectivePopupHeight). Every
+	// popup modal (the command palette, /settings, /agents, and the /key
+	// and /agents-model text fields) shares these two values — see
 	// paletteWidth/paletteHeight/textPopupWidth.
 	popupWidth  int
 	popupHeight int
@@ -548,704 +541,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 	a.layout()
 	return a, tea.Batch(cmds...)
-}
-
-func (a *App) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch {
-	case key.Matches(msg, keys.Quit):
-		switch {
-		case a.paletteKind == paletteConfirm, a.pendingConfirmation != nil:
-			// A HITL approval is blocking the turn — ctrl+c reads the same
-			// as Esc/n here (deny) rather than abandoning the whole app
-			// mid-decision.
-			return a, a.resolveConfirmation(false)
-		case a.paletteKind != paletteNone:
-			return a, a.backOrClose(a.cancelMenu)
-		case a.turnCancel != nil:
-			a.stopTurn()
-			return a, nil
-		case !a.quitArmedAt.IsZero() && time.Since(a.quitArmedAt) < quitConfirmWindow:
-			return a, tea.Quit
-		default:
-			a.quitArmedAt = time.Now()
-			a.systemMessage("Press ctrl+c again to exit.")
-			return a, nil
-		}
-
-	case key.Matches(msg, keys.AutoAccept):
-		a.toggleAutoAccept()
-		return a, nil
-
-	case key.Matches(msg, keys.VerboseTools):
-		a.toggleSetting("verbose")
-		return a, nil
-
-	case a.paletteKind == paletteTextInput:
-		return a.handleTextInputKey(msg)
-
-	case a.paletteKind == paletteConfirm:
-		return a.handleConfirmModalKey(msg)
-
-	case a.paletteKind != paletteNone:
-		return a.handlePaletteKey(msg)
-
-	case a.pendingConfirmation != nil:
-		return a.handlePendingConfirmKey(msg)
-
-	case len(a.suggestMatches) > 0:
-		return a.handleSuggestKey(msg)
-
-	case key.Matches(msg, keys.ScrollUp):
-		a.jumpToPrevPrompt()
-		return a, nil
-
-	case key.Matches(msg, keys.ScrollDown):
-		a.jumpToNextPrompt()
-		return a, nil
-
-	case key.Matches(msg, keys.Send):
-		return a, a.handleSend()
-	}
-
-	var cmd tea.Cmd
-	a.input, cmd = a.input.Update(msg)
-	a.layout()
-	return a, cmd
-}
-
-// handleSuggestKey runs while the inline "/command" dropdown is showing:
-// arrow keys move the highlight, Enter runs the highlighted command, Esc
-// clears the input to dismiss it, and anything else (more typing,
-// backspace, ...) still reaches the textarea so the query keeps narrowing.
-func (a *App) handleSuggestKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch {
-	case key.Matches(msg, keys.Up):
-		a.suggestIndex = max(a.suggestIndex-1, 0)
-		return a, nil
-
-	case key.Matches(msg, keys.Down):
-		a.suggestIndex = min(a.suggestIndex+1, len(a.suggestMatches)-1)
-		return a, nil
-
-	case key.Matches(msg, keys.Escape):
-		a.input.SetValue("")
-		a.layout()
-		return a, nil
-
-	case key.Matches(msg, keys.Send):
-		name := a.suggestMatches[a.suggestIndex].Name
-		a.input.SetValue("")
-		cmd := a.runCommand(name)
-		a.layout()
-		return a, cmd
-	}
-
-	var cmd tea.Cmd
-	a.input, cmd = a.input.Update(msg)
-	a.layout()
-	return a, cmd
-}
-
-func (a *App) handlePaletteKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch {
-	case key.Matches(msg, keys.Escape):
-		return a, a.backOrClose(a.cancelMenu)
-
-	case key.Matches(msg, keys.Send):
-		item, ok := a.paletteList.SelectedItem().(paletteItem)
-		if !ok {
-			return a, a.backOrClose(a.closeMenuCmd)
-		}
-		closeAfter, cmd := a.confirmMenuSelection(item.id)
-		if closeAfter {
-			return a, tea.Batch(cmd, a.backOrClose(a.closeMenuCmd))
-		}
-		return a, cmd
-	}
-
-	var cmd tea.Cmd
-	a.paletteList, cmd = a.paletteList.Update(msg)
-
-	// Live-preview: whatever's highlighted in the /theme or /loader menu
-	// is applied immediately, not just on confirm, so navigating repaints
-	// the whole app (this popup included) with the candidate theme, or
-	// swaps which animation is actively ticking above the input box.
-	switch a.paletteKind {
-	case paletteTheme:
-		if item, ok := a.paletteList.SelectedItem().(paletteItem); ok {
-			a.previewTheme(item.id)
-		}
-	case paletteLoader:
-		if item, ok := a.paletteList.SelectedItem().(paletteItem); ok {
-			a.previewWorkingAnim(item.id)
-		}
-	}
-
-	return a, cmd
-}
-
-// handleSend runs on Enter outside a popup menu: a leading "/" makes the
-// input a command instead of a chat message.
-func (a *App) handleSend() tea.Cmd {
-	text := strings.TrimSpace(a.input.Value())
-	if text == "" {
-		return nil
-	}
-
-	if name, ok := strings.CutPrefix(text, "/"); ok {
-		a.input.SetValue("")
-		cmd := a.runCommand(name)
-		a.layout()
-		return cmd
-	}
-
-	return a.sendMessage(text)
-}
-
-func (a *App) sendMessage(text string) tea.Cmd {
-	a.messages = append(a.messages, ChatMessage{Role: RoleUser, Content: text, At: time.Now()})
-	a.lastPromptText = text
-	a.input.SetValue("")
-	a.layout()
-	// Sending is a deliberate action, unlike the steady trickle of
-	// keystroke-driven refreshes elsewhere — always follow it to the
-	// bottom even if you'd scrolled up to read history first.
-	a.viewport.GotoBottom()
-
-	if a.backend == nil {
-		// Held rather than dropped or errored: the /key popup opens right
-		// here, and the keySetMsg handler in Update sends this same text
-		// the moment a key is successfully set.
-		a.pendingMessage = text
-		a.openKeyProviderMenu()
-		return nil
-	}
-
-	return a.dispatchToBackend(text)
-}
-
-// dispatchToBackend sends text to the current backend, streamed or in one
-// shot depending on streamReplies, and returns the tea.Cmd that kicks
-// that off. Shared by sendMessage's normal path and by the keySetMsg
-// handler resuming a held message.
-func (a *App) dispatchToBackend(text string) tea.Cmd {
-	a.status = theme.StatusThinking
-	a.workingLabel = "thinking"
-	a.reasoning = false
-	a.turnUsage, a.turnFinishReason = nil, ""
-	backend := a.backend
-	animCmd := a.startWorkingAnim()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	a.turnCancel = cancel
-
-	if !a.streamReplies {
-		return tea.Batch(animCmd, func() tea.Msg {
-			reply, err := backend.Send(ctx, a.sessionID, text)
-			if err != nil {
-				return agentReplyMsg{err: err}
-			}
-			return agentReplyMsg{text: reply}
-		})
-	}
-
-	return tea.Batch(animCmd, func() tea.Msg {
-		ch, err := backend.Stream(ctx, a.sessionID, text)
-		if err != nil {
-			return agentReplyMsg{err: err}
-		}
-		return streamStartMsg{ch: ch}
-	})
-}
-
-// stopTurn cancels whichever Send/Stream/RespondToConfirmation call is
-// currently in flight (see turnCancel) — ctrl+c's handler while the
-// agent is working (see handleKey). Cancellation itself is async: the
-// backend call notices ctx.Done() and returns a context.Canceled-
-// wrapped error same as any other failure, so the actual teardown
-// (clearing streamChan, ending the working animation) happens once that
-// arrives at streamChunkMsg/agentReplyMsg's handlers in Update, worded
-// as a deliberate stop there rather than an error.
-func (a *App) stopTurn() {
-	a.turnCancel()
-	a.systemMessage("Stopping...")
-}
-
-type agentReplyMsg struct {
-	text string
-	err  error
-}
-
-// streamStartMsg carries the channel a fresh Backend.Stream call is
-// delivering chunks on.
-type streamStartMsg struct {
-	ch <-chan StreamChunk
-}
-
-// streamChunkMsg wraps one receive from that channel; ok is false once
-// the channel's closed (the stream is over).
-type streamChunkMsg struct {
-	chunk StreamChunk
-	ok    bool
-}
-
-// readStreamChunk blocks on one channel receive — the standard Bubble
-// Tea pattern for draining a channel: each chunk re-arms this same Cmd
-// for the next one (see the streamChunkMsg case in Update), so the
-// program only ever has one outstanding read at a time.
-func readStreamChunk(ch <-chan StreamChunk) tea.Cmd {
-	return func() tea.Msg {
-		chunk, ok := <-ch
-		return streamChunkMsg{chunk: chunk, ok: ok}
-	}
-}
-
-// accumulateUsage folds one model call's usage into the running total for
-// the turn in progress — a turn can invoke the model more than once (e.g.
-// once to decide on a tool call, again after the result comes back).
-//
-// Prompt is NOT summed across calls: each call's PromptTokenCount is
-// already a cumulative snapshot of the entire conversation sent to the
-// model up to that point (the whole point of a "prompt" is it includes
-// everything before it), so a later call's prompt count already contains
-// an earlier call's in full. Summing them double-counted that shared
-// history — a turn with one intermediate tool call was reporting roughly
-// (first call's full context) + (second call's full context, which
-// already includes the first) instead of just the latter. Since context
-// only grows within a turn, the last call's Prompt is the correct total;
-// max is used rather than "just take the latest value" so this stays
-// correct even if a chunk somehow arrived out of order.
-//
-// Output, in contrast, genuinely is new content each call — the first
-// call's function-call tokens and the second call's final prose are both
-// real generation cost — so that part is correctly summed. Total is
-// recomputed from the corrected Prompt/Output rather than summed from
-// each call's own Total field, which would carry the same double-count.
-func (a *App) accumulateUsage(u *TokenUsage) {
-	if a.turnUsage == nil {
-		a.turnUsage = &TokenUsage{}
-	}
-	if u.Prompt > a.turnUsage.Prompt {
-		a.turnUsage.Prompt = u.Prompt
-	}
-	a.turnUsage.Output += u.Output
-	a.turnUsage.Total = a.turnUsage.Prompt + a.turnUsage.Output
-	a.contextUsed = a.turnUsage.Prompt
-}
-
-// reasoningTickInterval drives both the live "thinking Xms/Xs" re-render
-// cadence and, indirectly, the finest resolution a burst that ends
-// between ticks could show live (the final frozen duration is always
-// precise regardless — see endReasoning — this only affects what's
-// visible while still counting up). 100ms rather than stopwatch's own
-// 1s default: real reasoning bursts turned out to often finish well
-// under a second, and at a 1s interval the very first tick usually
-// never even fired before reasoning ended, leaving the badge stuck at
-// "0s" the whole time and the final duration landing on exactly zero.
-const reasoningTickInterval = 100 * time.Millisecond
-
-// startReasoning marks the current streaming message as actively
-// reasoning, records when it started, and starts a stopwatch purely as
-// a periodic wake-up source for live re-renders (see App.reasoning's
-// doc comment for why the displayed duration itself comes from
-// reasoningStart, not the stopwatch's own Elapsed()). Idempotent (a
-// no-op if already reasoning), since every reasoning chunk in a burst
-// hits this same case, not just the first.
-func (a *App) startReasoning() tea.Cmd {
-	if a.reasoning {
-		return nil
-	}
-	a.reasoning = true
-	a.reasoningStart = time.Now()
-	a.stopwatch = stopwatch.New(stopwatch.WithInterval(reasoningTickInterval))
-	if a.streamingMsgIndex < len(a.messages) {
-		a.messages[a.streamingMsgIndex].ReasoningActive = true
-		a.messages[a.streamingMsgIndex].ReasoningDuration = 0
-	}
-	return a.stopwatch.Start()
-}
-
-// endReasoning freezes the current streaming message's reasoning
-// duration at the precise wall-clock time elapsed since startReasoning
-// and stops the stopwatch — called from every place a turn's reasoning
-// phase can end: real text arriving, a tool call, the stream closing,
-// or an error. Idempotent (a no-op, returning nil, if reasoning wasn't
-// active) so every one of those call sites can call it unconditionally.
-func (a *App) endReasoning() tea.Cmd {
-	if !a.reasoning {
-		return nil
-	}
-	a.reasoning = false
-	if a.streamingMsgIndex < len(a.messages) {
-		a.messages[a.streamingMsgIndex].ReasoningActive = false
-		a.messages[a.streamingMsgIndex].ReasoningDuration = time.Since(a.reasoningStart)
-	}
-	return a.stopwatch.Stop()
-}
-
-// attachTurnFinishReason lands the turn's finish reason (if any) on the
-// last RoleAgent message it produced, then clears both accumulators.
-// Called once the turn is genuinely over (see the streamChunkMsg !ok
-// case) — never mid-turn, since a tool call in progress would otherwise
-// get an intermediate model call's reason attached to the wrong bubble.
-//
-// turnUsage itself isn't attached anywhere here — it's a running
-// accumulator only, already reflected live in a.contextUsed as it
-// updates (see accumulateUsage); nothing renders it per-message.
-//
-// If the model's very last call in the turn produced no closing prose,
-// its placeholder was already dropped by dropEmptyStreamingPlaceholder by
-// the time this runs, leaving no RoleAgent message left to attach to —
-// rare, and not worth inventing a bubble just to hold a finish reason,
-// so it's silently skipped rather than attached somewhere misleading.
-func (a *App) attachTurnFinishReason() {
-	reason := a.turnFinishReason
-	a.turnUsage, a.turnFinishReason = nil, ""
-	if reason == "" {
-		return
-	}
-	for i := len(a.messages) - 1; i >= 0; i-- {
-		if a.messages[i].Role == RoleAgent {
-			a.messages[i].FinishReason = reason
-			return
-		}
-	}
-}
-
-// upsertToolMessage tracks a tool call's opening state — running, then
-// (if applicable) awaiting approval or approved/denied — as a single
-// transcript entry found and updated by call ID rather than appended
-// fresh each event; see completeToolMessage for how the final result
-// lands, in a distinct field so it can be reformatted live if
-// verboseTools changes later instead of baking in a summary once at
-// event time. Without upserting-by-ID, a call's confirmation request and
-// its eventual result each used to print as their own separate message,
-// so the same invocation showed up two or three times in a row as it
-// progressed.
-//
-// On every later sighting of the same ID, only status/pending are
-// touched — args aren't overwritten, since only the initial call event
-// carries them; a confirmation event reuses them via nil.
-func (a *App) upsertToolMessage(id, name string, args map[string]any, status string, pending bool) {
-	if idx, ok := a.toolMsgIndex[id]; ok && idx < len(a.messages) {
-		a.messages[idx].ToolStatus = status
-		a.messages[idx].ToolPending = pending
-		return
-	}
-	a.newToolMessage(id, ChatMessage{ToolName: name, ToolArgs: args, ToolStatus: status, ToolPending: pending, At: time.Now()})
-}
-
-// completeToolMessage records a finished call's raw result. Kept
-// separate from upsertToolMessage (rather than another status string)
-// specifically so renderTool can reformat it live if verboseTools is
-// toggled after the fact — see ChatMessage's doc comment. A nil result
-// is normalized to an empty map so a genuinely-empty result stays
-// distinguishable from "no result yet" (ChatMessage.ToolResult == nil),
-// which is what renderTool actually checks.
-func (a *App) completeToolMessage(id, name string, result map[string]any) {
-	if result == nil {
-		result = map[string]any{}
-	}
-	if idx, ok := a.toolMsgIndex[id]; ok && idx < len(a.messages) {
-		a.messages[idx].ToolResult = result
-		a.messages[idx].ToolStatus = ""
-		a.messages[idx].ToolPending = false
-		return
-	}
-	// Shouldn't happen — a result always follows its own call, whose
-	// ToolCall event already created this entry — but mirrors
-	// upsertToolMessage's fallback rather than silently dropping a
-	// result with nowhere to attach to.
-	a.newToolMessage(id, ChatMessage{ToolName: name, ToolResult: result, At: time.Now()})
-}
-
-// newToolMessage appends a fresh RoleTool entry plus the trailing empty
-// agent placeholder every tool entry gets — same as the old
-// insertToolMessage — a fresh empty placeholder is opened after it for
-// whatever prose the agent sends next, dropping the previous placeholder
-// first if it never received any text (a tool call visually interrupts
-// the streaming reply in progress, so that reply's text shouldn't keep
-// appending into the same bubble as if nothing happened, but an
-// untouched placeholder isn't worth preserving as a stray empty bubble).
-// Records id -> index in toolMsgIndex so later events for the same call
-// find their way back here instead of appending a duplicate entry.
-func (a *App) newToolMessage(id string, msg ChatMessage) {
-	msg.Role = RoleTool
-	a.dropEmptyStreamingPlaceholder()
-	a.messages = append(a.messages, msg)
-	if a.toolMsgIndex == nil {
-		a.toolMsgIndex = map[string]int{}
-	}
-	a.toolMsgIndex[id] = len(a.messages) - 1
-
-	a.messages = append(a.messages, ChatMessage{Role: RoleAgent, Content: "", At: time.Now()})
-	a.streamingMsgIndex = len(a.messages) - 1
-}
-
-// dropEmptyStreamingPlaceholder removes the in-progress agent placeholder
-// if it never received any text — called both when a tool event is about
-// to interrupt it and when the stream ends outright (e.g. it closed right
-// after a tool result with no closing remarks).
-//
-// The Role check is not optional: RoleTool messages legitimately have an
-// empty Content too (they carry their data in other fields), so checking
-// Content alone would delete the very message just inserted in front of
-// this one — which is exactly what was happening to every confirmation
-// entry, since a confirmation pauses the stream immediately after, and
-// that pause's cleanup ran this same check without ever re-pointing
-// streamingMsgIndex away from it first.
-func (a *App) dropEmptyStreamingPlaceholder() {
-	if a.streamingMsgIndex < len(a.messages) &&
-		a.messages[a.streamingMsgIndex].Role == RoleAgent &&
-		a.messages[a.streamingMsgIndex].Content == "" {
-		a.messages = append(a.messages[:a.streamingMsgIndex], a.messages[a.streamingMsgIndex+1:]...)
-	}
-}
-
-func (a *App) applyTheme() {
-	a.styles = a.themeMgr.Styles()
-	// Keeps the boot banner's "theme" row in sync too — every caller
-	// (a real /theme confirm, a live preview while arrowing through the
-	// menu, cancelMenu reverting a preview) goes through here, so this
-	// is the one place that needs to know about BootInfo.Theme at all.
-	a.bootInfo.Theme = a.themeMgr.Current().Name
-	a.viewport.Style = a.styles.Viewport
-	applyInputStyles(&a.input, a.styles)
-	if a.paletteKind != paletteNone {
-		restylePalette(&a.paletteList, a.styles)
-	}
-	a.refreshTranscript()
-}
-
-// refreshTranscript re-renders the transcript into the viewport at
-// whatever scroll position the viewport is already at — it never moves
-// YOffset itself. This is the one layout() calls on nearly every
-// keystroke, resize, and cursor blink, so it has to leave scrolling
-// alone; see followTranscript for the variant that's allowed to move it.
-func (a *App) refreshTranscript() {
-	content, userMsgLines := renderTranscript(a.styles, a.messages, a.viewport.Width(), a.highlightUser, a.verboseTools, a.showReasoning)
-	a.viewport.SetContent(content)
-	a.userMsgLines = userMsgLines
-}
-
-// followTranscript is refreshTranscript's counterpart for the call sites
-// that just appended genuinely new content (a reply, a streamed chunk, a
-// system event). Only here — not in the generic keystroke/resize refresh
-// above — do we ask "was the user following the conversation?" and, if
-// so, keep following, all the way to the true bottom, same as always.
-//
-// Keeping the last prompt visible during an oversized response is handled
-// separately, in View() — as a sticky overlay pinned over whatever's
-// scrolled beneath it, not by capping where auto-follow can scroll to.
-func (a *App) followTranscript() {
-	wasAtBottom := a.viewport.AtBottom()
-	a.refreshTranscript()
-	if wasAtBottom {
-		a.viewport.GotoBottom()
-	}
-}
-
-// stickyPromptOverlay returns the pinned "you: ..." strip to composite
-// over the top of the viewport in View(), or "" if there's nothing to
-// pin — either no prompt's been sent yet, or the last one is already
-// visible at (or below) the current scroll position, in which case
-// overlaying it too would just draw a duplicate on top of itself.
-func (a *App) stickyPromptOverlay() string {
-	n := len(a.userMsgLines)
-	if n == 0 || a.lastPromptText == "" {
-		return ""
-	}
-	if a.viewport.YOffset() <= a.userMsgLines[n-1] {
-		return ""
-	}
-	return renderStickyPrompt(a.styles, a.lastPromptText, a.viewport.Width())
-}
-
-// jumpToPrevPrompt / jumpToNextPrompt back PgUp/PgDn: rather than
-// scrolling a fixed page height, they jump straight to the start of the
-// nearest earlier/later user message. Falls back to a plain page
-// scroll when there's no prompt in that direction — the top of the
-// conversation still has the boot banner above the first one, and the
-// bottom has nothing past the last one.
-func (a *App) jumpToPrevPrompt() {
-	for i := len(a.userMsgLines) - 1; i >= 0; i-- {
-		if a.userMsgLines[i] < a.viewport.YOffset() {
-			a.viewport.SetYOffset(a.userMsgLines[i])
-			return
-		}
-	}
-	a.viewport.PageUp()
-}
-
-func (a *App) jumpToNextPrompt() {
-	for _, line := range a.userMsgLines {
-		if line > a.viewport.YOffset() {
-			a.viewport.SetYOffset(line)
-			return
-		}
-	}
-	a.viewport.PageDown()
-}
-
-// layout recomputes every child component's size from the current terminal
-// dimensions and the input box's current wrap height. Called on resize and
-// after every input edit, since typing can grow or shrink the input box.
-func (a *App) layout() {
-	if a.width == 0 {
-		return
-	}
-	width := a.renderWidth()
-
-	a.input.SetWidth(width - 4) // border + padding on each side
-	a.inputLines = wrappedLines(a.input)
-
-	if query, active := a.commandQuery(); active {
-		a.suggestMatches = matchCommands(query)
-	} else {
-		a.suggestMatches = nil
-	}
-	if a.suggestIndex >= len(a.suggestMatches) {
-		a.suggestIndex = max(len(a.suggestMatches)-1, 0)
-	}
-
-	inputBoxHeight := a.inputLines + 2 // border top/bottom
-	// The "/" suggestions dropdown takes over the workingAnim's reserved
-	// slot right above the input bar rather than stacking above it (see
-	// View()) — so only one of the two is ever reserved here, not both.
-	reservedHeight := workingAnimHeight
-	if len(a.suggestMatches) > 0 {
-		reservedHeight = len(a.suggestMatches) + 2 // border top/bottom
-	}
-	vpHeight := max(a.height-topBarHeight-reservedHeight-inputBoxHeight-footerHeight, 0)
-
-	if a.viewport.Width() == 0 {
-		a.viewport = viewport.New(viewport.WithWidth(width), viewport.WithHeight(vpHeight))
-		a.viewport.MouseWheelDelta = 2 // a bit faster than 1, still finer than the 3-line default
-		a.viewport.Style = a.styles.Viewport
-	} else {
-		a.viewport.SetWidth(width)
-		a.viewport.SetHeight(vpHeight)
-	}
-
-	switch a.paletteKind {
-	case paletteTextInput:
-		a.keyInput.SetWidth(a.textPopupWidth() - 4)
-	case paletteNone:
-		// nothing to resize
-	default:
-		a.paletteList.SetSize(a.paletteWidth(), max(a.paletteHeight()-paletteTitleHeight, 0))
-		restylePalette(&a.paletteList, a.styles) // re-sync the title's baked-in width to the new size
-	}
-	a.refreshTranscript()
-}
-
-// resizeAndPreserveScroll is WindowSizeMsg's handler specifically when
-// the width changed (see the widthChanged branch in Update — a
-// height-only resize skips this entirely and just calls layout()
-// directly, since nothing below applies without an actual rewrap).
-// layout()'s own refreshTranscript rewraps the whole transcript to the
-// new width, which changes how many lines the same content actually
-// takes up — a plain numeric viewport.YOffset (a raw line index)
-// doesn't survive that. viewport.SetWidth/SetContent never touch it
-// themselves (confirmed from bubbles' own source), so left alone it
-// keeps pointing at whatever line index it was, which after a rewrap is
-// usually a *different* — and on a shrink specifically, visibly earlier
-// — chunk of the conversation than what was on screen a moment ago.
-// Widening happens to mostly self-correct (fewer wrapped lines means a
-// stale offset is more likely to just clamp near the bottom, which is
-// often where you want to be anyway); narrowing has no such luck, which
-// is exactly the asymmetry reported live: smooth growing the terminal,
-// jumpy shrinking it.
-//
-// Fixed by anchoring to content instead of a line number: capture
-// whether the viewport was pinned to the bottom, or which user message
-// was at/above the top edge, *before* the rewrap, then restore the
-// equivalent position afterward using userMsgLines' new (post-rewrap)
-// line numbers for that same message. Bottom-pinning is its own case
-// (same convention as followTranscript) rather than folded into the
-// message anchor, since anchoring to "the last message" wouldn't
-// necessarily still read as "the bottom" once a long reply under it
-// changes where the true bottom actually lands.
-func (a *App) resizeAndPreserveScroll() {
-	wasAtBottom := a.viewport.AtBottom()
-	anchor := a.scrollAnchor()
-
-	a.layout()
-
-	switch {
-	case wasAtBottom:
-		a.viewport.GotoBottom()
-	case anchor >= 0 && anchor < len(a.userMsgLines):
-		a.viewport.SetYOffset(a.userMsgLines[anchor])
-	}
-}
-
-// scrollAnchor returns the index into a.userMsgLines of the last user
-// message at or before the viewport's current scroll position, or -1 if
-// the viewport is scrolled above the first message (e.g. still showing
-// the boot banner).
-func (a *App) scrollAnchor() int {
-	anchor := -1
-	for i, line := range a.userMsgLines {
-		if line <= a.viewport.YOffset() {
-			anchor = i
-		}
-	}
-	return anchor
-}
-
-// popupWidthDefault/popupHeightDefault are every popup's outer size until
-// /settings' "Popup width"/"Popup height" is explicitly set (see
-// effectivePopupWidth/effectivePopupHeight) — the exact values this app
-// shipped with before that setting existed, so an untouched install looks
-// unchanged. popup{Width,Height}{Min,Max} bound what a typed value in
-// that setting's text field is clamped to (see submitPopupSize in
-// commands.go) — floors keep a popup legible, ceilings keep a typo like
-// an extra zero from being taken literally.
-const (
-	popupWidthDefault  = 50
-	popupHeightDefault = 12
-	popupWidthMin      = 24
-	popupWidthMax      = 200
-	popupHeightMin     = 6
-	popupHeightMax     = 80
-)
-
-func (a *App) effectivePopupWidth() int {
-	if a.popupWidth > 0 {
-		return a.popupWidth
-	}
-	return popupWidthDefault
-}
-
-func (a *App) effectivePopupHeight() int {
-	if a.popupHeight > 0 {
-		return a.popupHeight
-	}
-	return popupHeightDefault
-}
-
-// paletteWidth/paletteHeight are every list-backed popup's actual
-// on-screen size: the configured (or default) size, still clamped to the
-// terminal's own dimensions so a large configured popup never overflows
-// a small window.
-func (a *App) paletteWidth() int  { return min(a.width-8, a.effectivePopupWidth()) }
-func (a *App) paletteHeight() int { return min(a.height-8, a.effectivePopupHeight()) }
-
-// renderWidth is the actual column count every full-width component
-// renders at — one column narrower than the terminal's own reported
-// width. Purely a safety margin: during a fast interactive resize, a
-// WindowSizeMsg can lag the terminal's true current size by a frame or
-// two, and content rendered at exactly the terminal's full width wraps
-// onto an unwanted extra line the instant that happens — visible live
-// as the input box's own border wrapping and everything below it
-// snapping down, then back once the next WindowSizeMsg catches state
-// up. One column of slack on the right absorbs that lag before it ever
-// reaches the terminal's real edge. Not applied to popups (paletteWidth/
-// textPopupWidth) — those are already narrower and centered, nowhere
-// near the edge to begin with.
-func (a *App) renderWidth() int {
-	return max(a.width-1, 0)
 }
 
 func (a *App) View() tea.View {
