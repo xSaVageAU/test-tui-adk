@@ -51,6 +51,17 @@ func summarizeResult(result map[string]any) string {
 	return formatKV(result)
 }
 
+// joinAny renders a result list (grep's matches, glob's files) one entry
+// per line — verbose mode for those tools wants a scannable column, not
+// summarizeResult's comma-joined run-on.
+func joinAny(items []any) string {
+	parts := make([]string, len(items))
+	for i, e := range items {
+		parts[i] = fmt.Sprint(e)
+	}
+	return strings.Join(parts, "\n")
+}
+
 // formatToolArgs is renderTool's call-line formatter. list_files always
 // shows its target path regardless of verboseTools — there's nothing
 // else on its call line worth showing either way, and the directory
@@ -71,9 +82,21 @@ func formatToolArgs(name string, args map[string]any) string {
 			return path
 		}
 		return "." // listFiles' own default when no path is given
-	case "read_file", "write_file":
+	case "read_file", "write_file", "edit_file":
 		if path, ok := args["path"].(string); ok && path != "" {
 			return path
+		}
+	case "grep", "glob":
+		if pattern, ok := args["pattern"].(string); ok && pattern != "" {
+			return pattern
+		}
+	case "run_shell":
+		if cmd, ok := args["command"].(string); ok && cmd != "" {
+			return truncatePreview(cmd, maxArgValuePreview)
+		}
+	case "shell_output", "stop_shell":
+		if id, ok := args["shell_id"].(string); ok && id != "" {
+			return id
 		}
 	}
 	return formatKV(args)
@@ -124,6 +147,48 @@ func formatToolResult(name string, args, result map[string]any, verbose bool, ma
 			return fmt.Sprintf("%d entries", len(files))
 		}
 		// verbose falls through to summarizeResult, which lists every name.
+	case "edit_file":
+		if n, ok := intFromAny(result["replacements"]); ok {
+			return fmt.Sprintf("%d replacements", n)
+		}
+	case "grep":
+		if matches, ok := result["matches"].([]any); ok {
+			if !verbose {
+				return fmt.Sprintf("%d matches", len(matches))
+			}
+			return truncateLines(joinAny(matches), maxPreviewLines)
+		}
+	case "glob":
+		if files, ok := result["files"].([]any); ok {
+			if !verbose {
+				return fmt.Sprintf("%d files", len(files))
+			}
+			return truncateLines(joinAny(files), maxPreviewLines)
+		}
+	case "run_shell":
+		// A background launch returns a shell_id and no meaningful exit
+		// code — surface the id instead of a misleading "exit 0".
+		if id, ok := result["shell_id"].(string); ok && id != "" {
+			return "background " + id
+		}
+		if !verbose {
+			if code, ok := intFromAny(result["exit_code"]); ok {
+				return fmt.Sprintf("exit %d", code)
+			}
+		} else if out, ok := result["output"].(string); ok {
+			return truncateLines(out, maxPreviewLines)
+		}
+	case "shell_output":
+		if status, ok := result["status"].(string); ok {
+			if out, ok := result["output"].(string); verbose && ok && strings.TrimSpace(out) != "" {
+				return status + "\n" + truncateLines(out, maxPreviewLines)
+			}
+			return status
+		}
+	case "stop_shell":
+		if status, ok := result["status"].(string); ok {
+			return status
+		}
 	}
 	return summarizeResult(result)
 }

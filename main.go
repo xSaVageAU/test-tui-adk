@@ -136,8 +136,14 @@ func main() {
 	// declarative fields) — the chat viewport has MouseWheelEnabled by
 	// default, but nothing reached it without MouseMode set there.
 	p := tea.NewProgram(app)
-	if _, err := p.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
+	_, runErr := p.Run()
+	// Kill any processes the run_shell tool started in the background so
+	// they don't outlive the TUI. Called explicitly (not via defer)
+	// because the os.Exit below on the error path would skip deferred
+	// cleanup.
+	adk.ShutdownBackgroundProcesses()
+	if runErr != nil {
+		fmt.Fprintln(os.Stderr, "error:", runErr)
 		os.Exit(1)
 	}
 }

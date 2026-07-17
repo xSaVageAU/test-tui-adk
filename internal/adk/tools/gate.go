@@ -74,6 +74,15 @@ func dirRef(path string) resourceRef {
 	return resourceRef{Key: normalizePath(path), Recursive: true}
 }
 
+// dirWriteRef is a recursive *write* over a directory — used by run_shell,
+// whose command can create, modify, or delete anything under its working
+// directory, so it must serialize against every other file op in scope
+// (any read, write, or listing under the same tree). Unlike dirRef (a
+// recursive read), it sets Write, so it conflicts even with reads.
+func dirWriteRef(path string) resourceRef {
+	return resourceRef{Key: normalizePath(path), Write: true, Recursive: true}
+}
+
 func normalizePath(p string) string {
 	if p == "" {
 		p = "."

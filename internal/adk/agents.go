@@ -120,6 +120,14 @@ func buildRootAgent(ctx context.Context, callerProvider, callerAPIKey string) (b
 	return builtRoot{Agent: root, Name: rootCfg.Name, ModelName: modelName, ContextWindow: contextWindow, Specialists: names}, nil
 }
 
+// ShutdownBackgroundProcesses kills any processes the run_shell tool
+// started in the background, so they don't outlive the TUI. It's a thin
+// re-export of tools.ShutdownBackground, letting the app's shutdown path
+// (main.go) trigger cleanup without importing internal/adk/tools itself —
+// the same "main talks to adk, not adk's internals" seam as the rest of
+// this package's exported surface.
+func ShutdownBackgroundProcesses() { tools.ShutdownBackground() }
+
 // rootInstructionFor appends a generated "Available specialists" list
 // (name plus description, in loadSubAgentConfigs' order) to base — the
 // root's own instruction.md content — so the root always knows what it

@@ -9,22 +9,24 @@ import (
 	"google.golang.org/adk/v2/tool/functiontool"
 )
 
-// NewWriteFileTool builds the write_file tool — destructive (creates or
-// overwrites its target), so it requires confirmation in "normal" mode
-// (not statically via functiontool.Config.RequireConfirmation anymore —
-// see gate.go's confirmGated for why that couldn't stay a static flag
-// once the permission-mode/sub-agent-auto-accept logic needed per-call
-// context). Its resource is a write, conflicting with any read/write/
-// listing that overlaps its path.
-func NewWriteFileTool(rootName string) (tool.Tool, error) {
-	t, err := functiontool.New(functiontool.Config{
-		Name:        "write_file",
-		Description: "Writes content to a file at the given path, creating it or overwriting it if it already exists.",
-	}, writeFile)
-	if err != nil {
-		return nil, err
-	}
-	return gated(confirmGated(t, true, rootName), writeFileResources), nil
+// write_file is destructive (creates or overwrites its target), so it
+// requires confirmation in "normal" mode (destructive:true) — decided
+// per-call by confirmGated rather than statically via
+// functiontool.Config.RequireConfirmation, see gate.go for why that
+// couldn't stay a static flag once permission-mode/sub-agent-auto-accept
+// logic needed per-call context. Its resource is a write, conflicting
+// with any read/write/listing that overlaps its path.
+func init() {
+	register(spec{
+		destructive: true,
+		resources:   writeFileResources,
+		build: func() (tool.Tool, error) {
+			return functiontool.New(functiontool.Config{
+				Name:        "write_file",
+				Description: "Writes content to a file at the given path, creating it or overwriting it if it already exists.",
+			}, writeFile)
+		},
+	})
 }
 
 type writeFileArgs struct {

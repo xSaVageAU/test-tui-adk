@@ -10,24 +10,25 @@ import (
 	"google.golang.org/adk/v2/tool/functiontool"
 )
 
-// NewListFilesTool builds the list_files tool, shared by the root agent
-// and every specialist that wants it (functiontool.New just builds a
-// schema/handler pair — it's not agent-specific state, so the same
-// tool.Tool value can be handed to more than one agent's Tools list).
-// rootName is threaded through to confirmGated — see gate.go — so it can
-// tell a root call apart from a sub-agent one; it never actually
-// requires confirmation in "normal" mode (it's read-only, nothing to
-// approve), but is still wrapped for consistency and in case a future
-// mode wants it gated.
-func NewListFilesTool(rootName string) (tool.Tool, error) {
-	t, err := functiontool.New(functiontool.Config{
-		Name:        "list_files",
-		Description: "Lists files and directories at the given path. Defaults to the current working directory if path is omitted.",
-	}, listFiles)
-	if err != nil {
-		return nil, err
-	}
-	return gated(confirmGated(t, false, rootName), listFilesResources), nil
+// list_files is read-only (destructive:false — nothing to approve), but
+// still declares a directory-scoped read resource so a write completing
+// under the listed directory mid-batch can't hand back a stale listing
+// (see listFilesResources and gate.go's package doc). The built tool is
+// shared by the root agent and every specialist that wants it — the same
+// tool.Tool value can be handed to more than one agent's Tools list,
+// since functiontool.New just builds a schema/handler pair, not agent-
+// specific state.
+func init() {
+	register(spec{
+		destructive: false,
+		resources:   listFilesResources,
+		build: func() (tool.Tool, error) {
+			return functiontool.New(functiontool.Config{
+				Name:        "list_files",
+				Description: "Lists files and directories at the given path. Defaults to the current working directory if path is omitted.",
+			}, listFiles)
+		},
+	})
 }
 
 // Struct comments here are just for human readers — jsonschema-go (what
