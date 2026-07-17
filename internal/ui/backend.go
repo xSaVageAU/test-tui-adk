@@ -45,6 +45,14 @@ type Backend interface {
 	// not include a session's messages.
 	ListSessions(ctx context.Context) ([]SessionSummary, error)
 
+	// GetTranscript returns sessionID's full history as an ordered list
+	// of already-resolved entries — backs replaying a session's messages
+	// back into the transcript on switch (see App.switchSession). Unlike
+	// Stream, nothing here is in-flight or partial: the caller can walk
+	// the whole result in one synchronous pass instead of draining a
+	// channel.
+	GetTranscript(ctx context.Context, sessionID string) ([]TranscriptEntry, error)
+
 	// ModelName and Specialists report the root agent's resolved model
 	// and the sub-agents it loaded — read once at startup and again
 	// after every successful reconnect (a fresh /key, or /agents saving
@@ -63,6 +71,23 @@ type Backend interface {
 type SessionSummary struct {
 	ID        string
 	UpdatedAt time.Time
+}
+
+// TranscriptEntry is one already-settled item from a past session's full
+// history — Backend.GetTranscript's building block. Unlike StreamChunk
+// (built for an in-flight turn's deltas — partial text, dedup against
+// events an in-progress run can emit more than once), every field here
+// is a finished value with nothing left to resolve: a session's stored
+// history only ever contains fully-aggregated events (see GetTranscript's
+// implementation for why), so there's no partial text and no pending
+// confirmation to represent — only the tool call/result a resolved one
+// left behind. Exactly one field is set per entry, same one-field
+// convention as StreamChunk.
+type TranscriptEntry struct {
+	UserText   string
+	Text       string
+	ToolCall   *ToolCall
+	ToolResult *ToolResult
 }
 
 // StreamChunk is one increment of a streamed reply: exactly one field is

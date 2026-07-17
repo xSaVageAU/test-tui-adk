@@ -528,6 +528,23 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.openMenu(paletteSessions, "Switch session", items)
 		return a, nil
+
+	case transcriptLoadedMsg:
+		if msg.sessionID != a.sessionID {
+			return a, nil // stale — a later switch already landed first
+		}
+		if msg.err != nil {
+			a.systemMessage("Could not load history: " + msg.err.Error())
+			return a, nil
+		}
+		a.replayTranscript(msg.entries)
+		if len(msg.entries) == 0 {
+			a.systemMessage("Switched to " + shortSessionID(a.sessionID) + ".")
+		} else {
+			a.systemMessage("Switched to " + shortSessionID(a.sessionID) + " — history loaded.")
+		}
+		a.followTranscript()
+		return a, nil
 	}
 
 	if a.paletteKind == paletteTextInput {

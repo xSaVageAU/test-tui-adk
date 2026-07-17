@@ -8,6 +8,7 @@ import (
 	"google.golang.org/genai"
 
 	"google.golang.org/adk/v2/agent"
+	"google.golang.org/adk/v2/session"
 	"google.golang.org/adk/v2/tool/toolconfirmation"
 
 	"tui-testing/internal/ui"
@@ -170,6 +171,58 @@ func (c *Client) runStream(ctx context.Context, sessionID string, msg *genai.Con
 	}()
 
 	return ch
+}
+
+// GetTranscript reconstructs sessionID's full history from stored
+// events, for replaying a session's messages back into the transcript on
+// switch (see ui.App.switchSession). Unlike runStream, every event here
+// already finished: session.Service.AppendEvent only ever persists
+// non-partial events (confirmed by reading ADK's runner/run_node.go —
+// the streaming deltas that build up a reply live-side are never
+// written to storage, only the final aggregated event is), so there's no
+// delta/dedup handling to do here the way runStream needs. The user's
+// own messages are present as ordinary Author == "user" events (the
+// runner appends one for every Send/Stream call, confirmed in
+// runner/run_node.go's appendMessageToSession) — runStream never has to
+// deal with these since a live turn's user text is the caller's own
+// argument, not something arriving back over the event stream.
+func (c *Client) GetTranscript(ctx context.Context, sessionID string) ([]ui.TranscriptEntry, error) {
+	resp, err := c.sessions.Get(ctx, &session.GetRequest{AppName: appName, UserID: userID, SessionID: sessionID})
+	if err != nil {
+		return nil, fmt.Errorf("get session: %w", err)
+	}
+
+	var entries []ui.TranscriptEntry
+	for event := range resp.Session.Events().All() {
+		if event.Content == nil {
+			continue
+		}
+		isUser := event.Author == "user"
+		for _, part := range event.Content.Parts {
+			switch {
+			case isUser && part.Text != "":
+				entries = append(entries, ui.TranscriptEntry{UserText: part.Text})
+
+			case !part.Thought && part.Text != "":
+				entries = append(entries, ui.TranscriptEntry{Text: part.Text})
+
+			case part.FunctionCall != nil && part.FunctionCall.Name == toolconfirmation.FunctionCallName:
+				continue // resolved by the time history is replayed — the real call/result below is what matters
+
+			case part.FunctionCall != nil:
+				fc := part.FunctionCall
+				entries = append(entries, ui.TranscriptEntry{ToolCall: &ui.ToolCall{ID: fc.ID, Name: fc.Name, Args: fc.Args}})
+
+			case part.FunctionResponse != nil && part.FunctionResponse.Name == toolconfirmation.FunctionCallName:
+				continue // the user's approve/deny answer, not a real tool result
+
+			case part.FunctionResponse != nil:
+				fr := part.FunctionResponse
+				entries = append(entries, ui.TranscriptEntry{ToolResult: &ui.ToolResult{ID: fr.ID, Name: fr.Name, Result: fr.Response}})
+			}
+		}
+	}
+	return entries, nil
 }
 
 // confirmationHint pulls the human-readable explanation out of a

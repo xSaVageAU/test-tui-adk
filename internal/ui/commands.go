@@ -245,7 +245,7 @@ func (a *App) confirmMenuSelection(id string) (bool, tea.Cmd) {
 			a.toggleSetting(id)
 		}
 	case paletteSessions:
-		a.switchSession(id)
+		return true, a.switchSession(id)
 	case paletteKeyProvider:
 		a.pushMenuBack(func() tea.Cmd { a.openKeyProviderMenu(); return nil })
 		a.openKeyInput(id)

@@ -54,19 +54,62 @@ func (a *App) startNewSession() {
 	a.systemMessage("Started a new session.")
 }
 
-// switchSession changes which session subsequent messages go to.
-// Purely local, same reasoning as startNewSession — ADK resolves a
-// session by ID transparently on the next Send/Stream call, no
-// "activate" call needed on the backend. The visible transcript is
-// cleared rather than replayed: the backend still has this session's
-// full history, this UI just doesn't reconstruct it into ChatMessages —
-// a deliberately smaller v1 (replaying would mean re-deriving our
-// message model from raw stored events, a separate, bigger piece of
-// work than picking a session to resume).
-func (a *App) switchSession(id string) {
+// switchSession changes which session subsequent messages go to, and
+// kicks off replaying its stored history back into the transcript.
+// Purely local as far as which session subsequent messages go to — ADK
+// resolves a session by ID transparently on the next Send/Stream call,
+// no "activate" call needed on the backend — but populating what's
+// already on screen needs one GetTranscript round trip, landed via
+// transcriptLoadedMsg (see Update) rather than blocking here.
+func (a *App) switchSession(id string) tea.Cmd {
 	a.sessionID = id
 	a.resetTranscriptState()
-	a.systemMessage("Switched to " + shortSessionID(id) + " — new messages continue that conversation, though earlier messages aren't shown here.")
+	a.systemMessage("Switched to " + shortSessionID(id) + " — loading history...")
+
+	backend := a.backend
+	return func() tea.Msg {
+		entries, err := backend.GetTranscript(context.Background(), id)
+		return transcriptLoadedMsg{sessionID: id, entries: entries, err: err}
+	}
+}
+
+// transcriptLoadedMsg carries switchSession's async GetTranscript
+// result. sessionID is checked against a.sessionID before it's applied
+// (see Update) — a second switch fired before the first's round trip
+// lands would otherwise stamp a stale reply onto whatever's now current.
+type transcriptLoadedMsg struct {
+	sessionID string
+	entries   []TranscriptEntry
+	err       error
+}
+
+// replayTranscript rebuilds a.messages from a session's full stored
+// history — GetTranscript's ordered entries, replayed through the same
+// upsertToolMessage/completeToolMessage bookkeeping live streaming uses
+// (see transcript.go), just synchronously in one pass instead of
+// arriving one event at a time over a channel. A user-text entry opens a
+// fresh agent placeholder right after it, mirroring sendMessage +
+// streamStartMsg's combined effect for a live turn, so every following
+// Text/ToolCall entry always has a legitimate open target to land in.
+func (a *App) replayTranscript(entries []TranscriptEntry) {
+	for _, e := range entries {
+		switch {
+		case e.UserText != "":
+			a.dropEmptyStreamingPlaceholder()
+			a.messages = append(a.messages, ChatMessage{Role: RoleUser, Content: e.UserText, At: time.Now()})
+			a.messages = append(a.messages, ChatMessage{Role: RoleAgent, Content: "", At: time.Now()})
+			a.streamingMsgIndex = len(a.messages) - 1
+		case e.ToolCall != nil:
+			a.upsertToolMessage(e.ToolCall.ID, e.ToolCall.Name, e.ToolCall.Args, "", false)
+		case e.ToolResult != nil:
+			a.completeToolMessage(e.ToolResult.ID, e.ToolResult.Name, e.ToolResult.Result)
+		case e.Text != "":
+			if a.streamingMsgIndex < len(a.messages) {
+				a.messages[a.streamingMsgIndex].Content += e.Text
+			}
+		}
+	}
+	a.dropEmptyStreamingPlaceholder()
 }
 
 // sessionsLoadedMsg carries the result of the async ListSessions call
