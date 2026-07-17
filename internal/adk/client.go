@@ -217,6 +217,14 @@ func (c *Client) RespondToConfirmation(ctx context.Context, sessionID string, de
 	return c.runStream(ctx, sessionID, content), nil
 }
 
+// DeleteSession permanently removes sessionID from the session store.
+func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
+	if err := c.sessions.Delete(ctx, &session.DeleteRequest{AppName: appName, UserID: userID, SessionID: sessionID}); err != nil {
+		return fmt.Errorf("delete session: %w", err)
+	}
+	return nil
+}
+
 // ListSessions returns every session for this app/user, most-recently-
 // updated first. Metadata-only — session.Service.List doesn't populate a
 // session's events (confirmed by reading session/database/service.go's

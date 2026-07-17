@@ -246,6 +246,8 @@ func (a *App) confirmMenuSelection(id string) (bool, tea.Cmd) {
 		}
 	case paletteSessions:
 		return true, a.switchSession(id)
+	case paletteConfirmDeleteSession:
+		return true, a.confirmDeleteSession(id)
 	case paletteKeyProvider:
 		a.pushMenuBack(func() tea.Cmd { a.openKeyProviderMenu(); return nil })
 		a.openKeyInput(id)

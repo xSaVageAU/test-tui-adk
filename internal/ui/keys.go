@@ -52,6 +52,13 @@ type keyMap struct {
 	// rather than trying to find yet another combo that might collide
 	// elsewhere.
 	VerboseTools key.Binding
+
+	// DeleteSession/DeleteAllSessions only mean anything while /sessions'
+	// list has focus (see handlePaletteKey) — like Up/Down, not global
+	// hotkeys, so left out of the footer; /sessions' own popup title
+	// documents them instead.
+	DeleteSession     key.Binding
+	DeleteAllSessions key.Binding
 }
 
 var keys = keyMap{
@@ -90,5 +97,13 @@ var keys = keyMap{
 	VerboseTools: key.NewBinding(
 		key.WithKeys("f2"),
 		key.WithHelp("f2", "verbose tools"),
+	),
+	DeleteSession: key.NewBinding(
+		key.WithKeys("delete"),
+		key.WithHelp("del", "delete session"),
+	),
+	DeleteAllSessions: key.NewBinding(
+		key.WithKeys("ctrl+delete"),
+		key.WithHelp("ctrl+del", "delete all sessions"),
 	),
 }

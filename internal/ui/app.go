@@ -14,6 +14,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"tui-testing/internal/settings"
@@ -205,6 +206,13 @@ type App struct {
 	agentToolsAll     []ToolSummary
 	agentToolsCurrent map[string]bool
 	agentToolsChanged bool
+
+	// deleteSessionTarget is which session /sessions' DEL-key confirm
+	// popup is about to delete, set by openDeleteSessionConfirm — "" means
+	// "every session", set by openDeleteAllSessionsConfirm (ctrl+DEL)
+	// instead of naming one. Safe as a sentinel since a real session ID is
+	// always a non-empty UUID. See sessions.go.
+	deleteSessionTarget string
 
 	// listAgents/setAgentProvider/setAgentModel/setAgentTools/listTools
 	// back /agents — nil disables the command (mirrors newBackend's
@@ -544,6 +552,31 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.systemMessage("Switched to " + shortSessionID(a.sessionID) + " — history loaded.")
 		}
 		a.followTranscript()
+		return a, nil
+
+	case sessionsDeletedMsg:
+		n := len(msg.deletedIDs)
+		if n == 0 {
+			a.systemMessage("Could not delete session(s): " + msg.err.Error())
+			return a, nil
+		}
+		label := "Deleted 1 session."
+		if n != 1 {
+			label = fmt.Sprintf("Deleted %d sessions.", n)
+		}
+		if msg.err != nil {
+			label += " Some failed: " + msg.err.Error()
+		}
+		a.systemMessage(label)
+		for _, id := range msg.deletedIDs {
+			if id == a.sessionID {
+				a.startNewSession()
+				break
+			}
+		}
+		if msg.remaining > 0 {
+			return a, a.openSessionsMenu()
+		}
 		return a, nil
 	}
 

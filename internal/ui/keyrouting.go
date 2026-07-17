@@ -119,6 +119,20 @@ func (a *App) handlePaletteKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.Escape):
 		return a, a.backOrClose(a.cancelMenu)
 
+	// DEL/ctrl+DEL only mean anything on the /sessions list itself — see
+	// keys.go's DeleteSession/DeleteAllSessions doc comment.
+	case a.paletteKind == paletteSessions && key.Matches(msg, keys.DeleteAllSessions):
+		if n := len(a.paletteList.Items()); n > 0 {
+			a.openDeleteAllSessionsConfirm(n)
+		}
+		return a, nil
+
+	case a.paletteKind == paletteSessions && key.Matches(msg, keys.DeleteSession):
+		if item, ok := a.paletteList.SelectedItem().(paletteItem); ok {
+			a.openDeleteSessionConfirm(item.id)
+		}
+		return a, nil
+
 	case key.Matches(msg, keys.Send):
 		item, ok := a.paletteList.SelectedItem().(paletteItem)
 		if !ok {

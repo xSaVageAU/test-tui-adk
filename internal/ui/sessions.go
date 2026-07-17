@@ -140,6 +140,110 @@ func (a *App) openSessionsMenu() tea.Cmd {
 	}
 }
 
+// openDeleteSessionConfirm opens /sessions' DEL-key confirm popup for one
+// session — reached from the /sessions list itself (see keyrouting.go's
+// handlePaletteKey). Escape/Cancel returns to that list rather than
+// closing the whole popup, the same pushMenuBack pattern every other
+// nested step in this app uses.
+func (a *App) openDeleteSessionConfirm(id string) {
+	a.deleteSessionTarget = id
+	a.pushMenuBack(func() tea.Cmd { return a.openSessionsMenu() })
+	a.openMenu(paletteConfirmDeleteSession, "Delete session "+shortSessionID(id)+"?", []paletteItem{
+		{id: "delete", title: "Delete"},
+		{id: "cancel", title: "Cancel"},
+	})
+}
+
+// openDeleteAllSessionsConfirm is openDeleteSessionConfirm's ctrl+DEL
+// counterpart — deleteSessionTarget "" is the sentinel confirmDeleteSession
+// reads to mean "every session" rather than one specific ID.
+func (a *App) openDeleteAllSessionsConfirm(count int) {
+	a.deleteSessionTarget = ""
+	a.pushMenuBack(func() tea.Cmd { return a.openSessionsMenu() })
+	a.openMenu(paletteConfirmDeleteSession, fmt.Sprintf("Delete ALL %d sessions?", count), []paletteItem{
+		{id: "delete", title: "Delete"},
+		{id: "cancel", title: "Cancel"},
+	})
+}
+
+// confirmDeleteSession runs the DEL/ctrl+DEL confirm popup's chosen row —
+// id is "delete" or "cancel"; Cancel is a no-op here, since backOrClose
+// (already run by confirmMenuSelection's caller) pops back to the
+// /sessions list on its own, unchanged data and all.
+//
+// Delete deliberately does NOT reopen /sessions itself the way every
+// other nested step's pushMenuBack would — whether there's anything left
+// to show isn't known until the delete actually finishes, so
+// openDeleteSessionConfirm/openDeleteAllSessionsConfirm's pushed reopen
+// is discarded here via closeMenu (back to the plain chat view) and
+// sessionsDeletedMsg's handler in Update decides whether to reopen
+// /sessions once the real remaining count comes back with it — that's
+// also what fixes the bug where deleting the last session(s) landed back
+// on a list that still (stale) showed them.
+func (a *App) confirmDeleteSession(id string) tea.Cmd {
+	if id != "delete" {
+		return nil
+	}
+	a.closeMenu()
+	backend := a.backend
+	target := a.deleteSessionTarget
+
+	if target != "" {
+		a.systemMessage("Deleting session...")
+		return func() tea.Msg {
+			ctx := context.Background()
+			err := backend.DeleteSession(ctx, target)
+			if err != nil {
+				return sessionsDeletedMsg{err: err, remaining: -1}
+			}
+			remaining := -1
+			if sessions, lerr := backend.ListSessions(ctx); lerr == nil {
+				remaining = len(sessions)
+			}
+			return sessionsDeletedMsg{deletedIDs: []string{target}, remaining: remaining}
+		}
+	}
+
+	a.systemMessage("Deleting all sessions...")
+	return func() tea.Msg {
+		ctx := context.Background()
+		sessions, err := backend.ListSessions(ctx)
+		if err != nil {
+			return sessionsDeletedMsg{err: err, remaining: -1}
+		}
+		var deleted []string
+		var firstErr error
+		for _, s := range sessions {
+			if err := backend.DeleteSession(ctx, s.ID); err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+			deleted = append(deleted, s.ID)
+		}
+		remaining := -1
+		if after, lerr := backend.ListSessions(ctx); lerr == nil {
+			remaining = len(after)
+		}
+		return sessionsDeletedMsg{deletedIDs: deleted, remaining: remaining, err: firstErr}
+	}
+}
+
+// sessionsDeletedMsg carries confirmDeleteSession's async result.
+// deletedIDs is whatever actually got removed — for a delete-all batch,
+// err (if non-nil) is only the *first* failure hit; the rest of the
+// batch is still attempted rather than aborting partway through.
+// remaining is a fresh post-delete session count (-1 if it couldn't be
+// determined) — Update reopens /sessions only when it's > 0, so deleting
+// the last session(s) lands back on the plain chat view instead of a
+// list that (stale) still shows what was just removed.
+type sessionsDeletedMsg struct {
+	deletedIDs []string
+	remaining  int
+	err        error
+}
+
 // relativeTime renders a compact "how long ago" label for the /sessions
 // picker — good enough for telling recent conversations apart without
 // needing a full timestamp; falls back to an absolute date once it's

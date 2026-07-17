@@ -20,15 +20,16 @@ const (
 	paletteNone paletteKind = iota
 	paletteTheme
 	paletteSettings
-	paletteTextInput     // not list-backed — shared by /key and /agents' model field, see keyinput.go
-	paletteConfirm       // list-backed (Approve/Deny) but has its own key handler — see hitl.go
-	paletteSessions      // see sessions.go
-	paletteKeyProvider   // /key's first step: which provider is this key for — see keyinput.go
-	paletteAgents        // /agents' top-level list: root + every sub-agent — see agentsmenu.go
-	paletteAgentDetail   // /agents' per-agent list: Provider / Model / Tools — see agentsmenu.go
-	paletteAgentProvider // /agents' provider picker for whichever agent is selected — see agentsmenu.go
-	paletteAgentTools    // /agents' tools checklist for whichever agent is selected — see agentsmenu.go
-	paletteLoader        // /loader: pick the "agent is working" animation — see workinganim.go
+	paletteTextInput            // not list-backed — shared by /key and /agents' model field, see keyinput.go
+	paletteConfirm              // list-backed (Approve/Deny) but has its own key handler — see hitl.go
+	paletteSessions             // see sessions.go
+	paletteConfirmDeleteSession // /sessions' DEL/ctrl+DEL confirm popup — see sessions.go
+	paletteKeyProvider          // /key's first step: which provider is this key for — see keyinput.go
+	paletteAgents               // /agents' top-level list: root + every sub-agent — see agentsmenu.go
+	paletteAgentDetail          // /agents' per-agent list: Provider / Model / Tools — see agentsmenu.go
+	paletteAgentProvider        // /agents' provider picker for whichever agent is selected — see agentsmenu.go
+	paletteAgentTools           // /agents' tools checklist for whichever agent is selected — see agentsmenu.go
+	paletteLoader               // /loader: pick the "agent is working" animation — see workinganim.go
 )
 
 // paletteItem is a single row in any popup menu (themes, settings). id is

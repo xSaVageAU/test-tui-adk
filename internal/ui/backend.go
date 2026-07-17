@@ -53,6 +53,13 @@ type Backend interface {
 	// channel.
 	GetTranscript(ctx context.Context, sessionID string) ([]TranscriptEntry, error)
 
+	// DeleteSession permanently removes sessionID and its history — backs
+	// /sessions' DEL-key delete (confirmed via a popup first, see
+	// App.openDeleteSessionConfirm). Deleting every session (ctrl+DEL)
+	// isn't a separate backend call: the caller already has every ID from
+	// ListSessions, so it just calls this once per session instead.
+	DeleteSession(ctx context.Context, sessionID string) error
+
 	// ModelName and Specialists report the root agent's resolved model
 	// and the sub-agents it loaded — read once at startup and again
 	// after every successful reconnect (a fresh /key, or /agents saving
