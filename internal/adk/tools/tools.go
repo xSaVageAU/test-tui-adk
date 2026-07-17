@@ -27,6 +27,7 @@ var registryConstructors = []func(rootName string) (tool.Tool, error){
 	NewListFilesTool,
 	NewReadFileTool,
 	NewWriteFileTool,
+	NewReloadAgentsTool,
 }
 
 // Registry builds every tool in registryConstructors and returns them

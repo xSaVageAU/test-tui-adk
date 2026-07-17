@@ -38,6 +38,16 @@ type agentFileConfig struct {
 	// model" (a sub-agent — see buildSubAgents).
 	Provider string `json:"provider,omitempty"`
 	Model    string `json:"model,omitempty"`
+	// MCPServers names configured MCP servers (see mcpservers.go) this
+	// agent should have as toolsets — resolved only by buildRootAgent.
+	// Root-only for now: a sub-agent's own HITL confirmation can never be
+	// resolved (the same known gap write_file already has for sub-agents
+	// — see gate.go), and ADK's MCP confirmation hook has no per-agent
+	// identity to special-case around it the way gate.go does for its own
+	// tools. buildSubAgents deliberately never reads this field, so a
+	// hand-edited sub-agent agent.json listing one is silently inert
+	// rather than an error.
+	MCPServers []string `json:"mcpServers,omitempty"`
 
 	instruction string // from instruction.md, not agent.json — see loadAgentFileConfig
 }

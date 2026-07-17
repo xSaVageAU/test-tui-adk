@@ -96,12 +96,22 @@ func buildRootAgent(ctx context.Context, callerProvider, callerAPIKey string) (b
 		names[i] = sa.Name()
 	}
 
+	mcpConfigs, err := loadMCPServerConfigs()
+	if err != nil {
+		return builtRoot{}, fmt.Errorf("load mcp server configs: %w", err)
+	}
+	mcpToolsets, err := buildMCPToolsets(mcpConfigs, rootCfg.MCPServers, rootCfg.Name)
+	if err != nil {
+		return builtRoot{}, err
+	}
+
 	root, err := llmagent.New(llmagent.Config{
 		Name:        rootCfg.Name,
 		Model:       rootModel,
 		Description: rootCfg.Description,
 		Instruction: rootInstructionFor(rootCfg.instruction, subAgents),
 		Tools:       rootTools,
+		Toolsets:    mcpToolsets,
 	})
 	if err != nil {
 		return builtRoot{}, fmt.Errorf("create agent: %w", err)

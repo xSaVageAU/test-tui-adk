@@ -126,6 +126,14 @@ type App struct {
 	// getting in line behind it.
 	queuedMessages []string
 
+	// reloadRequested is set when a reload_agents tool call completes
+	// mid-turn (see backend.go's StreamChunk.ReloadRequested) and cleared
+	// — with the actual reloadBackend() call batched in — at the same
+	// "turn genuinely concluded" points popQueuedMessage runs at, never
+	// immediately: reloadBackend() refuses outright while turnInProgress()
+	// is true, which it still is the moment this flag gets set.
+	reloadRequested bool
+
 	// quitArmedAt is when ctrl+c was last pressed with nothing else for
 	// it to do (no popup open, no turn running) — a second press within
 	// quitConfirmWindow actually quits; any later press, or one while
@@ -419,12 +427,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.turnCancel = nil
 		if msg.err != nil {
 			a.status = theme.StatusIdle
-			// popQueuedMessage before systemMessage: it unmarks the next
-			// message's Queued flag, and systemMessage's own
-			// followTranscript call is what actually renders that change —
-			// the other way around would leave it visually stale for a
-			// frame.
-			cmd := a.popQueuedMessage()
+			// concludeTurn before systemMessage: a queued message or a
+			// pending reload both need the turn treated as genuinely over
+			// before they act, and systemMessage's own followTranscript
+			// call is what actually renders whatever that produces — the
+			// other way around would leave it visually stale for a frame.
+			cmd := a.concludeTurn()
 			if errors.Is(msg.err, context.Canceled) {
 				a.systemMessage("Stopped.")
 			} else {
@@ -435,7 +443,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.messages = append(a.messages, ChatMessage{Role: RoleAgent, Content: msg.text, At: time.Now()})
 		a.status = theme.StatusIdle
-		cmd := a.popQueuedMessage()
+		cmd := a.concludeTurn()
 		a.followTranscript()
 		return a, cmd
 
@@ -460,11 +468,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// pause, not the turn actually ending — resolveConfirmation
 			// reopens a fresh channel for the same turn, so the running
 			// totals need to survive until then rather than land now, and
-			// nothing queued should fire yet either (turnInProgress is
-			// still true — see popQueuedMessage).
+			// nothing queued/reload-pending should fire yet either
+			// (turnInProgress is still true — see concludeTurn).
 			if a.pendingConfirmation == nil {
 				a.attachTurnFinishReason()
-				endCmd = tea.Batch(endCmd, a.popQueuedMessage())
+				endCmd = tea.Batch(endCmd, a.concludeTurn())
 			}
 			a.followTranscript()
 			return a, endCmd
@@ -475,7 +483,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			endCmd := a.endReasoning()
 			// See agentReplyMsg's error branch for why this runs before
 			// systemMessage below.
-			queueCmd := a.popQueuedMessage()
+			queueCmd := a.concludeTurn()
 			if errors.Is(msg.chunk.Err, context.Canceled) {
 				a.status = theme.StatusIdle
 				a.dropEmptyStreamingPlaceholder()
@@ -510,6 +518,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if a.streamingMsgIndex < len(a.messages) {
 				a.messages[a.streamingMsgIndex].ReasoningText += msg.chunk.Reasoning
 			}
+		case msg.chunk.ReloadRequested:
+			// Just latch the flag — concludeTurn (called once this turn
+			// actually ends) is what turns it into a real reloadBackend()
+			// call; acting on it here would hit reloadBackend()'s own
+			// turnInProgress() guard and silently no-op.
+			a.reloadRequested = true
 		default:
 			cmd = a.endReasoning()
 			a.messages[a.streamingMsgIndex].Content += msg.chunk.Text

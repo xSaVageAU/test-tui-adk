@@ -11,6 +11,7 @@ import (
 	"google.golang.org/adk/v2/session"
 	"google.golang.org/adk/v2/tool/toolconfirmation"
 
+	"tui-testing/internal/adk/tools"
 	"tui-testing/internal/ui"
 )
 
@@ -164,6 +165,20 @@ func (c *Client) runStream(ctx context.Context, sessionID string, msg *genai.Con
 					seenResults[key] = true
 					if !send(ui.StreamChunk{ToolResult: &ui.ToolResult{ID: fr.ID, Name: fr.Name, Result: fr.Response}}) {
 						return
+					}
+					// A completed reload_agents call is also a distinct
+					// signal, on top of the ordinary ToolResult above (which
+					// still shows it in the transcript like any other tool
+					// call) — tools have no direct way to reach back into
+					// the running backend, so this is how that request
+					// actually gets to App.Update, which defers the real
+					// reloadBackend() call until the turn genuinely
+					// concludes (see backend.go's StreamChunk.ReloadRequested
+					// doc comment for why it can't just happen here).
+					if fr.Name == tools.ReloadAgentsToolName {
+						if !send(ui.StreamChunk{ReloadRequested: true}) {
+							return
+						}
 					}
 				}
 			}

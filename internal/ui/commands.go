@@ -30,6 +30,7 @@ var commandSpecs = []commandSpec{
 	{Name: "agents", Desc: "Configure agent provider/model"},
 	{Name: "loader", Desc: "Choose the \"working\" animation"},
 	{Name: "interrupt", Desc: "Stop the current response, optionally with a new prompt"},
+	{Name: "reload-agents", Desc: "Reload agents/tools/MCP servers from disk"},
 	{Name: "exit", Desc: "Quit the app"},
 }
 
@@ -118,13 +119,21 @@ func (a *App) runCommand(name string) tea.Cmd {
 		a.openAgentsMenu()
 	case "loader":
 		return a.openLoaderMenu()
+	case "reload-agents":
+		// Same reloadBackend() /agents already uses after a config edit —
+		// its own turnInProgress() guard already handles "can't reload
+		// mid-turn" correctly for this manual path, nothing extra needed
+		// here. See turn.go's concludeTurn for the other way this fires
+		// (a reload_agents tool call, deferred until the turn concludes).
+		a.systemMessage("Reloading agents...")
+		return a.reloadBackend()
 	case "exit":
 		// A typed, deliberate command — unlike ctrl+c (see handleKey),
 		// this never needs the "press again to confirm" safety net, so it
 		// quits immediately regardless of what else is going on.
 		return tea.Quit
 	default:
-		a.systemMessage("Unknown command: /" + name + " — try /new, /sessions, /theme, /settings, /key, /agents, /loader, /interrupt, or /exit.")
+		a.systemMessage("Unknown command: /" + name + " — try /new, /sessions, /theme, /settings, /key, /agents, /loader, /interrupt, /reload-agents, or /exit.")
 	}
 	return nil
 }

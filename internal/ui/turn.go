@@ -105,6 +105,22 @@ func (a *App) popQueuedMessage() tea.Cmd {
 	return a.sendNow(next)
 }
 
+// concludeTurn is the actual call site, at all four places in Update a
+// turn genuinely ends, for both popQueuedMessage and a pending
+// reload_agents request (see App.reloadRequested) — settled together
+// since both need the exact same "turnInProgress is false again" moment:
+// popQueuedMessage to avoid racing the turn that was just running, and
+// reloadRequested because reloadBackend()'s own guard would silently
+// no-op if called any earlier (still mid-turn).
+func (a *App) concludeTurn() tea.Cmd {
+	cmd := a.popQueuedMessage()
+	if a.reloadRequested {
+		a.reloadRequested = false
+		cmd = tea.Batch(cmd, a.reloadBackend())
+	}
+	return cmd
+}
+
 // dispatchToBackend sends text to the current backend, streamed or in one
 // shot depending on streamReplies, and returns the tea.Cmd that kicks
 // that off. Shared by sendMessage's normal path and by the keySetMsg

@@ -120,7 +120,15 @@ type StreamChunk struct {
 	// field) tags it at the source; see internal/adk/eventstream.go and
 	// internal/adk/openrouter's aggregator for where each is set.
 	Reasoning string
-	Err       error
+	// ReloadRequested means a reload_agents tool call just completed —
+	// see App.reloadRequested. Deliberately does *not* mean "reload right
+	// now": the turn that produced it is still running when this arrives,
+	// and Backend.RespondToConfirmation/reloadBackend's own
+	// turnInProgress() guard would silently refuse if called mid-turn —
+	// App defers the actual reload to the moment the turn genuinely
+	// concludes instead.
+	ReloadRequested bool
+	Err             error
 }
 
 // TokenUsage reports the token cost of one underlying model call.
