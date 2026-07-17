@@ -302,7 +302,9 @@ type AppConfig struct {
 func NewApp(cfg AppConfig) *App {
 	mgr := theme.NewManager(theme.Load()...)
 	styles := mgr.Styles()
-	uiSettings := settings.Load().UI
+	loadedSettings := settings.Load()
+	uiSettings := loadedSettings.UI
+	agentSettings := loadedSettings.Agent
 
 	var messages []ChatMessage
 	if cfg.BackendNote != "" {
@@ -330,7 +332,7 @@ func NewApp(cfg AppConfig) *App {
 		popupHeight:         uiSettings.PopupHeight,
 		toolPreviewMaxLines: uiSettings.ToolPreviewMaxLines,
 		hitlMode:            parseHITLMode(uiSettings.HITLMode),
-		permissionMode:      parsePermissionMode(uiSettings.PermissionMode),
+		permissionMode:      parsePermissionMode(agentSettings.PermissionMode),
 		inputLines:          minInputLines,
 		messages:            messages,
 		input:               newInput(styles),

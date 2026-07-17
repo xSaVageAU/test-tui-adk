@@ -353,7 +353,7 @@ func (c *confirmGatedTool) Run(ctx agent.Context, args any) (map[string]any, err
 	// exists for this call (we requested one below on an earlier pass,
 	// and the human has since answered).
 	tc := ctx.ToolConfirmation()
-	if tc == nil && c.requiresConfirmation(ctx.AgentName(), settings.Load().UI.PermissionMode) {
+	if tc == nil && c.requiresConfirmation(ctx.AgentName(), settings.Load().Agent.PermissionMode) {
 		hint := fmt.Sprintf("Please approve or reject the tool call %s() by responding with a FunctionResponse with an expected ToolConfirmation payload.", c.Name())
 		if err := ctx.RequestConfirmation(hint, nil); err != nil {
 			return nil, err

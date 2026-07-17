@@ -14,29 +14,26 @@ import (
 	"tui-testing/internal/appdir"
 )
 
-// Settings is the whole shape of settings.json. Wrapped in a "ui" key
-// rather than being flat so a future unrelated section (not agent
-// config — that lives in agent.json now) has somewhere to go without a
-// migration.
+// Settings is the whole shape of settings.json. Split into a top-level
+// key per concern — UI (purely visual/TUI toggles) and Agent (agent/tool
+// execution policy) — rather than one flat section, so each can grow its
+// own larger shape later (Agent in particular is expected to gain a lot
+// more, e.g. per-tool policy) without a migration or the two kinds of
+// setting getting tangled together in one struct.
 type Settings struct {
-	UI UISettings `json:"ui"`
+	UI    UISettings    `json:"ui"`
+	Agent AgentSettings `json:"agent"`
 }
 
-// UISettings mirrors the toggles /settings exposes in the TUI — see
-// internal/ui/commands.go's openSettingsMenu. Written automatically by
-// the app every time one changes.
+// UISettings mirrors the toggles /settings' "TUI Settings" page exposes
+// — see internal/ui/commands.go's openTUISettingsMenu. Written
+// automatically by the app every time one changes. Purely
+// display/interaction concerns — anything that changes what the agent
+// itself is allowed to do belongs in AgentSettings instead.
 type UISettings struct {
 	HighlightUser bool   `json:"highlightUser"`
 	StreamReplies bool   `json:"streamReplies"`
 	HITLMode      string `json:"hitlMode"` // "modal" or "inline"
-	// PermissionMode governs whether a confirmation-gated tool call
-	// (write_file today) actually asks for approval — see
-	// internal/adk/toolgate.go's confirmGated, the actual consumer of
-	// this value. Any value other than ModeFullAuto (including "",
-	// covering an older settings.json written before this field
-	// existed) is treated as ModeNormal — deliberately fail-safe rather
-	// than needing its own explicit "missing/malformed" handling here.
-	PermissionMode string `json:"permissionMode"`
 	// VerboseTools governs how much detail a tool call/result shows in
 	// the transcript — false (the default) is a one-line lean summary
 	// per call (see internal/ui/chat.go's formatToolArgs/
@@ -81,6 +78,22 @@ type UISettings struct {
 	ToolPreviewMaxLines int `json:"toolPreviewMaxLines,omitempty"`
 }
 
+// AgentSettings mirrors /settings' "Agent Settings" page — agent/tool
+// execution policy, distinct from UISettings' display concerns. Expected
+// to grow (per-tool policy, execution targets, ...) as the app's config
+// surface expands; kept as its own top-level settings.json section from
+// the start specifically so that growth doesn't need a migration later.
+type AgentSettings struct {
+	// PermissionMode governs whether a confirmation-gated tool call
+	// (write_file today) actually asks for approval — see
+	// internal/adk/tools/gate.go's confirmGatedTool, the actual consumer
+	// of this value. Any value other than ModeFullAuto (including "",
+	// covering an older settings.json written before this field
+	// existed) is treated as ModeNormal — deliberately fail-safe rather
+	// than needing its own explicit "missing/malformed" handling here.
+	PermissionMode string `json:"permissionMode"`
+}
+
 // ModeNormal/ModeFullAuto are PermissionMode's only two valid values —
 // pre-defined, not yet user-customizable per-tool (see the
 // config-discovery-pattern memory for the fuller design intent this is
@@ -93,19 +106,25 @@ const (
 // DefaultUISettings is what a fresh install (no settings.json yet, or
 // one whose UI section is missing/malformed) starts from.
 func DefaultUISettings() UISettings {
-	return UISettings{HighlightUser: true, StreamReplies: true, HITLMode: "modal", PermissionMode: ModeNormal}
+	return UISettings{HighlightUser: true, StreamReplies: true, HITLMode: "modal"}
 }
 
-// Load reads settings.json, falling back to DefaultUISettings()
-// whenever the file is missing, unreadable, or malformed — always
-// returns something usable, never an error the caller needs to handle
-// specially, matching theme.Load()'s same best-effort shape. If the
-// file didn't exist at all (a fresh install), the defaults are written
-// out immediately — same self-heal-on-load behavior as the root agent's
-// config (see internal/adk/rootagent.go) — so settings.json shows up on
-// disk from first launch, not only after the first toggle change.
+// DefaultAgentSettings is AgentSettings' equivalent of DefaultUISettings.
+func DefaultAgentSettings() AgentSettings {
+	return AgentSettings{PermissionMode: ModeNormal}
+}
+
+// Load reads settings.json, falling back to DefaultUISettings()/
+// DefaultAgentSettings() whenever the file is missing, unreadable, or
+// malformed — always returns something usable, never an error the
+// caller needs to handle specially, matching theme.Load()'s same
+// best-effort shape. If the file didn't exist at all (a fresh install),
+// the defaults are written out immediately — same self-heal-on-load
+// behavior as the root agent's config (see internal/adk/rootagent.go) —
+// so settings.json shows up on disk from first launch, not only after
+// the first toggle change.
 func Load() Settings {
-	fallback := Settings{UI: DefaultUISettings()}
+	fallback := Settings{UI: DefaultUISettings(), Agent: DefaultAgentSettings()}
 
 	path, err := appdir.Path("settings.json")
 	if err != nil {
@@ -124,6 +143,22 @@ func Load() Settings {
 	}
 	if s.UI.HITLMode == "" {
 		s.UI = DefaultUISettings()
+	}
+	if s.Agent.PermissionMode == "" {
+		s.Agent = DefaultAgentSettings()
+		// A settings.json written before AgentSettings existed had
+		// permissionMode nested under "ui" instead — recover it here so
+		// migrating to the new shape doesn't silently reset an existing
+		// full-auto preference back to normal. Best-effort: any parse
+		// failure just leaves the default set above.
+		var legacy struct {
+			UI struct {
+				PermissionMode string `json:"permissionMode"`
+			} `json:"ui"`
+		}
+		if json.Unmarshal(data, &legacy) == nil && legacy.UI.PermissionMode != "" {
+			s.Agent.PermissionMode = legacy.UI.PermissionMode
+		}
 	}
 	return s
 }

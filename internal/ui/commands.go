@@ -153,19 +153,47 @@ func (a *App) previewWorkingAnim(name string) {
 	a.workingAnim.variant = parseWorkingAnimVariant(name)
 }
 
+// openSettingsMenu is /settings' entry point — a top-level category
+// picker rather than one flat list of every toggle, so purely visual/TUI
+// settings stay visually and structurally separate from agent/tool
+// execution policy (currently just "Tool approval mode", but expected to
+// grow — see settings.AgentSettings). Selecting a category pushes back
+// here (see confirmMenuSelection's paletteSettings case) so Esc/Cancel
+// from either sub-page returns to this picker, not straight to the chat.
 func (a *App) openSettingsMenu() {
+	items := []paletteItem{
+		{id: "tui", title: "TUI Settings", desc: "display, popups, tool output"},
+		{id: "agent", title: "Agent Settings", desc: "tool approval policy"},
+	}
+	a.openMenu(paletteSettings, "Settings", items)
+}
+
+// openTUISettingsMenu is /settings → "TUI Settings" — purely
+// display/interaction toggles, persisted under settings.json's "ui" key.
+func (a *App) openTUISettingsMenu() {
 	items := []paletteItem{
 		{id: "highlight", title: "Highlight user messages", desc: onOff(a.highlightUser)},
 		{id: "stream", title: "Stream replies token-by-token", desc: onOff(a.streamReplies)},
 		{id: "hitl", title: "Tool approval style", desc: a.hitlMode.String() + " — select to cycle"},
-		{id: "permission", title: "Tool approval mode", desc: a.permissionMode.String() + " — select to cycle"},
 		{id: "verbose", title: "Verbose tool output", desc: onOff(a.verboseTools)},
 		{id: "reasoning", title: "Show reasoning text", desc: onOff(a.showReasoning)},
 		{id: "popupWidth", title: "Popup width", desc: fmt.Sprintf("%d — select to edit", a.effectivePopupWidth())},
 		{id: "popupHeight", title: "Popup height", desc: fmt.Sprintf("%d — select to edit", a.effectivePopupHeight())},
 		{id: "toolPreviewLines", title: "Tool output preview lines", desc: fmt.Sprintf("%d — select to edit", a.effectiveToolPreviewMaxLines())},
 	}
-	a.openMenu(paletteSettings, "Settings", items)
+	a.openMenu(paletteSettingsTUI, "TUI Settings", items)
+}
+
+// openAgentSettingsMenu is /settings → "Agent Settings" — agent/tool
+// execution policy, persisted under settings.json's "agent" key. Just
+// one row today (permission mode); the category exists ahead of having
+// much to put in it so later additions (per-tool policy, execution
+// targets, ...) have an obvious, already-separated home.
+func (a *App) openAgentSettingsMenu() {
+	items := []paletteItem{
+		{id: "permission", title: "Tool approval mode", desc: a.permissionMode.String() + " — select to cycle"},
+	}
+	a.openMenu(paletteSettingsAgent, "Agent Settings", items)
 }
 
 // effectiveToolPreviewMaxLines is verbose tool output's actual line
@@ -229,21 +257,34 @@ func (a *App) confirmMenuSelection(id string) (bool, tea.Cmd) {
 		a.systemMessage("Working animation set to " + id + ".")
 	case paletteSettings:
 		switch id {
-		case "popupWidth":
+		case "tui":
 			a.pushMenuBack(func() tea.Cmd { a.openSettingsMenu(); return nil })
+			a.openTUISettingsMenu()
+			return false, nil
+		case "agent":
+			a.pushMenuBack(func() tea.Cmd { a.openSettingsMenu(); return nil })
+			a.openAgentSettingsMenu()
+			return false, nil
+		}
+	case paletteSettingsTUI:
+		switch id {
+		case "popupWidth":
+			a.pushMenuBack(func() tea.Cmd { a.openTUISettingsMenu(); return nil })
 			a.openPopupSizeInput(textPopupPopupWidth, "Set popup width", a.effectivePopupWidth())
 			return false, nil
 		case "popupHeight":
-			a.pushMenuBack(func() tea.Cmd { a.openSettingsMenu(); return nil })
+			a.pushMenuBack(func() tea.Cmd { a.openTUISettingsMenu(); return nil })
 			a.openPopupSizeInput(textPopupPopupHeight, "Set popup height", a.effectivePopupHeight())
 			return false, nil
 		case "toolPreviewLines":
-			a.pushMenuBack(func() tea.Cmd { a.openSettingsMenu(); return nil })
+			a.pushMenuBack(func() tea.Cmd { a.openTUISettingsMenu(); return nil })
 			a.openPopupSizeInput(textPopupToolPreviewLines, "Set tool output preview lines", a.effectiveToolPreviewMaxLines())
 			return false, nil
 		default:
 			a.toggleSetting(id)
 		}
+	case paletteSettingsAgent:
+		a.toggleSetting(id)
 	case paletteSessions:
 		return true, a.switchSession(id)
 	case paletteConfirmDeleteSession:
@@ -357,13 +398,15 @@ func (a *App) persistSettings() {
 		HighlightUser:       a.highlightUser,
 		StreamReplies:       a.streamReplies,
 		HITLMode:            a.hitlMode.String(),
-		PermissionMode:      a.permissionMode.String(),
 		VerboseTools:        a.verboseTools,
 		WorkingAnim:         workingAnimNames[a.workingAnim.variant],
 		HideReasoningText:   !a.showReasoning,
 		PopupWidth:          a.popupWidth,
 		PopupHeight:         a.popupHeight,
 		ToolPreviewMaxLines: a.toolPreviewMaxLines,
+	}
+	s.Agent = settings.AgentSettings{
+		PermissionMode: a.permissionMode.String(),
 	}
 	_ = settings.Save(s)
 }

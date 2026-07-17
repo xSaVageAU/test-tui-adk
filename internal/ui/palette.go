@@ -19,7 +19,9 @@ type paletteKind int
 const (
 	paletteNone paletteKind = iota
 	paletteTheme
-	paletteSettings
+	paletteSettings             // /settings' top-level category picker — "TUI Settings" vs "Agent Settings" — see commands.go's openSettingsMenu
+	paletteSettingsTUI          // /settings' display/interaction toggles — see commands.go's openTUISettingsMenu
+	paletteSettingsAgent        // /settings' agent/tool execution policy toggles — see commands.go's openAgentSettingsMenu
 	paletteTextInput            // not list-backed — shared by /key and /agents' model field, see keyinput.go
 	paletteConfirm              // list-backed (Approve/Deny) but has its own key handler — see hitl.go
 	paletteSessions             // see sessions.go
