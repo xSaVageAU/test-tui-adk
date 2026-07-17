@@ -9,6 +9,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/glebarez/sqlite v1.11.0
 	github.com/google/uuid v1.6.0
+	github.com/pelletier/go-toml/v2 v2.4.3
 	google.golang.org/adk/v2 v2.0.0
 	google.golang.org/genai v1.63.0
 	gorm.io/gorm v1.31.2

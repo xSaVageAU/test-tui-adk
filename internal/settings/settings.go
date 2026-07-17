@@ -1,28 +1,35 @@
-// Package settings owns ~/.tui-testing/settings.json — the app's
-// general-purpose UI settings file, distinct from credentials.json
+// Package settings owns ~/.tui-testing/settings.toml — the app's
+// general-purpose UI/agent settings file, distinct from credentials.json
 // (secrets) and an agent's own agent.json (root or sub-agent config,
-// including which provider/model it runs on — see internal/adk). It's a
-// neutral package, like internal/appdir and internal/theme:
-// internal/ui both writes this (whenever a /settings toggle changes)
-// and reads it at startup.
+// including which provider/model it runs on — see internal/adk). TOML
+// rather than JSON specifically because, unlike agent.json (mostly
+// written by the root agent or an interface, not hand-edited) and the
+// theme files, this is the one config surface meant to be comfortable to
+// edit by hand — comments and a lighter syntax are worth a dependency
+// here. It's a neutral package, like internal/appdir and internal/theme:
+// internal/ui both writes this (whenever a /settings toggle changes) and
+// reads it at startup.
 package settings
 
 import (
-	"encoding/json"
 	"os"
 
 	"tui-testing/internal/appdir"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
-// Settings is the whole shape of settings.json. Split into a top-level
-// key per concern — UI (purely visual/TUI toggles) and Agent (agent/tool
-// execution policy) — rather than one flat section, so each can grow its
-// own larger shape later (Agent in particular is expected to gain a lot
-// more, e.g. per-tool policy) without a migration or the two kinds of
-// setting getting tangled together in one struct.
+const settingsFileName = "settings.toml"
+
+// Settings is the whole shape of settings.toml. Split into a top-level
+// section per concern — UI (purely visual/TUI toggles) and Agent (agent/
+// tool execution policy) — rather than one flat section, so each can
+// grow its own larger shape later (Agent in particular is expected to
+// gain a lot more, e.g. per-tool policy) without a migration or the two
+// kinds of setting getting tangled together in one struct.
 type Settings struct {
-	UI    UISettings    `json:"ui"`
-	Agent AgentSettings `json:"agent"`
+	UI    UISettings    `toml:"ui"`
+	Agent AgentSettings `toml:"agent"`
 }
 
 // UISettings mirrors the toggles /settings' "TUI Settings" page exposes
@@ -31,9 +38,9 @@ type Settings struct {
 // display/interaction concerns — anything that changes what the agent
 // itself is allowed to do belongs in AgentSettings instead.
 type UISettings struct {
-	HighlightUser bool   `json:"highlightUser"`
-	StreamReplies bool   `json:"streamReplies"`
-	HITLMode      string `json:"hitlMode"` // "modal" or "inline"
+	HighlightUser bool   `toml:"highlightUser"`
+	StreamReplies bool   `toml:"streamReplies"`
+	HITLMode      string `toml:"hitlMode"` // "modal" or "inline"
 	// VerboseTools governs how much detail a tool call/result shows in
 	// the transcript — false (the default) is a one-line lean summary
 	// per call (see internal/ui/chat.go's formatToolArgs/
@@ -41,57 +48,57 @@ type UISettings struct {
 	// dump. Off by default: a model's own read_file/write_file/
 	// list_files results are routine, not something worth reading in
 	// full on every call.
-	VerboseTools bool `json:"verboseTools"`
+	VerboseTools bool `toml:"verboseTools"`
 	// WorkingAnim is the active "agent is working" animation's name (see
 	// internal/ui/workinganim.go's workingAnimNames) — same
 	// name-as-persisted-id convention the theme picker already uses. ""
-	// (an older settings.json, or one that's simply never been changed)
+	// (an older settings file, or one that's simply never been changed)
 	// falls back to the first variant.
-	WorkingAnim string `json:"workingAnim"`
+	WorkingAnim string `toml:"workingAnim"`
 	// HideReasoningText governs whether a reasoning-capable model's
 	// actual thinking output (see internal/ui/chat.go's renderMessage)
 	// is shown as its own block under the "agent" label. Stored inverted
 	// — false (shown) is the wanted default, and phrasing the field this
 	// way makes that default line up with bool's own zero value, so an
-	// older settings.json that predates this field (or simply has it
+	// older settings file that predates this field (or simply has it
 	// omitted) naturally still shows the text rather than needing
 	// special "field absent" handling the way a field defaulting to true
 	// would. App.showReasoning (its positive form) is what the rest of
 	// the UI actually reads — see NewApp/persistSettings for the
 	// negation, kept at this one boundary rather than spreading
 	// !hideReasoningText through render code.
-	HideReasoningText bool `json:"hideReasoningText"`
+	HideReasoningText bool `toml:"hideReasoningText"`
 	// PopupWidth/PopupHeight override the outer size every popup modal
 	// renders at (the command palette, /settings, /agents, the /key and
 	// /agents-model text fields — see internal/ui/app.go's
 	// effectivePopupWidth/effectivePopupHeight, the only readers of these
 	// two fields). 0 means "unset", falling back to popupWidthDefault/
-	// popupHeightDefault there — omitempty keeps an untouched
-	// settings.json free of two keys nobody's ever edited.
-	PopupWidth  int `json:"popupWidth,omitempty"`
-	PopupHeight int `json:"popupHeight,omitempty"`
+	// popupHeightDefault there — omitempty keeps an untouched settings
+	// file free of two keys nobody's ever edited.
+	PopupWidth  int `toml:"popupWidth,omitempty"`
+	PopupHeight int `toml:"popupHeight,omitempty"`
 	// ToolPreviewMaxLines caps how many lines of a tool's content (
 	// read_file's result, write_file's written content) verbose mode
 	// shows before truncating — see internal/ui/toolformat.go's
 	// toolPreviewMaxLinesDefault. 0 means "unset", falling back to that
 	// default.
-	ToolPreviewMaxLines int `json:"toolPreviewMaxLines,omitempty"`
+	ToolPreviewMaxLines int `toml:"toolPreviewMaxLines,omitempty"`
 }
 
 // AgentSettings mirrors /settings' "Agent Settings" page — agent/tool
 // execution policy, distinct from UISettings' display concerns. Expected
 // to grow (per-tool policy, execution targets, ...) as the app's config
-// surface expands; kept as its own top-level settings.json section from
-// the start specifically so that growth doesn't need a migration later.
+// surface expands; kept as its own top-level settings section from the
+// start specifically so that growth doesn't need a migration later.
 type AgentSettings struct {
 	// PermissionMode governs whether a confirmation-gated tool call
 	// (write_file today) actually asks for approval — see
 	// internal/adk/tools/gate.go's confirmGatedTool, the actual consumer
 	// of this value. Any value other than ModeFullAuto (including "",
-	// covering an older settings.json written before this field
+	// covering an older settings file written before this field
 	// existed) is treated as ModeNormal — deliberately fail-safe rather
 	// than needing its own explicit "missing/malformed" handling here.
-	PermissionMode string `json:"permissionMode"`
+	PermissionMode string `toml:"permissionMode"`
 }
 
 // ModeNormal/ModeFullAuto are PermissionMode's only two valid values —
@@ -103,7 +110,7 @@ const (
 	ModeFullAuto = "full-auto"
 )
 
-// DefaultUISettings is what a fresh install (no settings.json yet, or
+// DefaultUISettings is what a fresh install (no settings file yet, or
 // one whose UI section is missing/malformed) starts from.
 func DefaultUISettings() UISettings {
 	return UISettings{HighlightUser: true, StreamReplies: true, HITLMode: "modal"}
@@ -114,19 +121,19 @@ func DefaultAgentSettings() AgentSettings {
 	return AgentSettings{PermissionMode: ModeNormal}
 }
 
-// Load reads settings.json, falling back to DefaultUISettings()/
+// Load reads settings.toml, falling back to DefaultUISettings()/
 // DefaultAgentSettings() whenever the file is missing, unreadable, or
 // malformed — always returns something usable, never an error the
 // caller needs to handle specially, matching theme.Load()'s same
 // best-effort shape. If the file didn't exist at all (a fresh install),
 // the defaults are written out immediately — same self-heal-on-load
 // behavior as the root agent's config (see internal/adk/rootagent.go) —
-// so settings.json shows up on disk from first launch, not only after
+// so settings.toml shows up on disk from first launch, not only after
 // the first toggle change.
 func Load() Settings {
 	fallback := Settings{UI: DefaultUISettings(), Agent: DefaultAgentSettings()}
 
-	path, err := appdir.Path("settings.json")
+	path, err := appdir.Path(settingsFileName)
 	if err != nil {
 		return fallback
 	}
@@ -138,7 +145,7 @@ func Load() Settings {
 		return fallback
 	}
 	var s Settings
-	if err := json.Unmarshal(data, &s); err != nil {
+	if err := toml.Unmarshal(data, &s); err != nil {
 		return fallback
 	}
 	if s.UI.HITLMode == "" {
@@ -146,30 +153,18 @@ func Load() Settings {
 	}
 	if s.Agent.PermissionMode == "" {
 		s.Agent = DefaultAgentSettings()
-		// A settings.json written before AgentSettings existed had
-		// permissionMode nested under "ui" instead — recover it here so
-		// migrating to the new shape doesn't silently reset an existing
-		// full-auto preference back to normal. Best-effort: any parse
-		// failure just leaves the default set above.
-		var legacy struct {
-			UI struct {
-				PermissionMode string `json:"permissionMode"`
-			} `json:"ui"`
-		}
-		if json.Unmarshal(data, &legacy) == nil && legacy.UI.PermissionMode != "" {
-			s.Agent.PermissionMode = legacy.UI.PermissionMode
-		}
 	}
 	return s
 }
 
-// Save persists the whole Settings value, overwriting the file.
+// Save persists the whole Settings value to settings.toml, overwriting
+// the file.
 func Save(s Settings) error {
-	path, err := appdir.Path("settings.json")
+	path, err := appdir.Path(settingsFileName)
 	if err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(s, "", "  ")
+	data, err := toml.Marshal(s)
 	if err != nil {
 		return err
 	}
