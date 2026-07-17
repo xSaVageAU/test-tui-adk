@@ -6,7 +6,10 @@
 // a turn.
 package ui
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // upsertToolMessage tracks a tool call's opening state — running, then
 // (if applicable) awaiting approval or approved/denied — as a single
@@ -155,6 +158,25 @@ func (a *App) stickyPromptOverlay() string {
 		return ""
 	}
 	return renderStickyPrompt(a.styles, a.lastPromptText, a.viewport.Width())
+}
+
+// queuedPromptOverlay returns the pinned "queued: ..." strip to
+// composite over the *bottom* of the viewport in View(), or "" if
+// nothing's queued. Unlike stickyPromptOverlay, this isn't conditional
+// on scroll position — a queued message hasn't been sent at all yet, so
+// it stays visible the whole time it's waiting regardless of where
+// you've scrolled, not just once it scrolls out of the naturally-visible
+// area. Only the next message to actually go out is named; any more
+// behind it in the queue are just counted, not each spelled out.
+func (a *App) queuedPromptOverlay() string {
+	if len(a.queuedMessages) == 0 {
+		return ""
+	}
+	text := a.queuedMessages[0]
+	if extra := len(a.queuedMessages) - 1; extra > 0 {
+		text = fmt.Sprintf("%s (+%d more queued)", text, extra)
+	}
+	return renderQueuedPrompt(a.styles, text, a.viewport.Width())
 }
 
 // jumpToPrevPrompt / jumpToNextPrompt back PgUp/PgDn: rather than

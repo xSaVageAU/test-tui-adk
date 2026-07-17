@@ -88,6 +88,13 @@ type Styles struct {
 	// oversized response — see View()'s sticky-overlay compositing.
 	StickyPrompt lipgloss.Style
 
+	// QueuedPrompt is the pinned "queued: ..." strip overlaid on the
+	// bottom of the chat while a message is waiting to send (see
+	// ChatMessage.Queued, App.queuedPromptOverlay) — unlike StickyPrompt
+	// (which is about a prompt you already sent), this is Attention-
+	// colored, the same "notable/pending" family as ToolConfirmPending.
+	QueuedPrompt lipgloss.Style
+
 	// BootArt styles the block-letter boot banner (see bootart.go) —
 	// Background(Background), not Surface: there's no panel behind it
 	// anymore, just the art sitting directly on the app's own background,
@@ -287,6 +294,11 @@ func New(t Theme) Styles {
 	s.StickyPrompt = lipgloss.NewStyle().
 		Background(lipgloss.Color(t.Highlight)).
 		Foreground(lipgloss.Color(t.Text)).
+		Bold(true)
+
+	s.QueuedPrompt = lipgloss.NewStyle().
+		Background(lipgloss.Color(t.Attention)).
+		Foreground(lipgloss.Color(t.TextOnFill)).
 		Bold(true)
 
 	s.BootArt = lipgloss.NewStyle().

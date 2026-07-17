@@ -117,6 +117,15 @@ type App struct {
 	// apart from "the main view."
 	turnCancel context.CancelFunc
 
+	// queuedMessages holds text sent while a turn was already running,
+	// in send order — popQueuedMessage (turn.go) dispatches the next one
+	// the moment the current turn genuinely ends (success, error, or a
+	// stop), rather than firing a second concurrent turn. /interrupt
+	// (also turn.go) replaces this outright instead of appending, since
+	// redirecting means skipping whatever was already waiting, not
+	// getting in line behind it.
+	queuedMessages []string
+
 	// quitArmedAt is when ctrl+c was last pressed with nothing else for
 	// it to do (no popup open, no turn running) — a second press within
 	// quitConfirmWindow actually quits; any later press, or one while
@@ -410,18 +419,25 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.turnCancel = nil
 		if msg.err != nil {
 			a.status = theme.StatusIdle
+			// popQueuedMessage before systemMessage: it unmarks the next
+			// message's Queued flag, and systemMessage's own
+			// followTranscript call is what actually renders that change —
+			// the other way around would leave it visually stale for a
+			// frame.
+			cmd := a.popQueuedMessage()
 			if errors.Is(msg.err, context.Canceled) {
 				a.systemMessage("Stopped.")
 			} else {
 				a.status = theme.StatusError
 				a.systemMessage("Error: " + msg.err.Error())
 			}
-			return a, nil
+			return a, cmd
 		}
 		a.messages = append(a.messages, ChatMessage{Role: RoleAgent, Content: msg.text, At: time.Now()})
 		a.status = theme.StatusIdle
+		cmd := a.popQueuedMessage()
 		a.followTranscript()
-		return a, nil
+		return a, cmd
 
 	case streamStartMsg:
 		// Empty placeholder that streamChunkMsg fills in as chunks arrive.
@@ -443,9 +459,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// pendingConfirmation set means this channel close is a HITL
 			// pause, not the turn actually ending — resolveConfirmation
 			// reopens a fresh channel for the same turn, so the running
-			// totals need to survive until then rather than land now.
+			// totals need to survive until then rather than land now, and
+			// nothing queued should fire yet either (turnInProgress is
+			// still true — see popQueuedMessage).
 			if a.pendingConfirmation == nil {
 				a.attachTurnFinishReason()
+				endCmd = tea.Batch(endCmd, a.popQueuedMessage())
 			}
 			a.followTranscript()
 			return a, endCmd
@@ -454,6 +473,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.streamChan = nil
 			a.turnCancel = nil
 			endCmd := a.endReasoning()
+			// See agentReplyMsg's error branch for why this runs before
+			// systemMessage below.
+			queueCmd := a.popQueuedMessage()
 			if errors.Is(msg.chunk.Err, context.Canceled) {
 				a.status = theme.StatusIdle
 				a.dropEmptyStreamingPlaceholder()
@@ -462,7 +484,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.status = theme.StatusError
 				a.systemMessage("Error: " + msg.chunk.Err.Error())
 			}
-			return a, endCmd
+			return a, tea.Batch(endCmd, queueCmd)
 		}
 		var cmd tea.Cmd
 		switch {
@@ -614,6 +636,10 @@ func (a *App) View() tea.View {
 	body := a.viewport.View()
 	if sticky := a.stickyPromptOverlay(); sticky != "" {
 		body = overlay(body, sticky, 0, 0, a.viewport.Width())
+	}
+	if queued := a.queuedPromptOverlay(); queued != "" {
+		y := lipgloss.Height(body) - lipgloss.Height(queued)
+		body = overlay(body, queued, 0, y, a.viewport.Width())
 	}
 	inputBar := renderInputBar(a.styles, a.input, width, a.inputLines, true)
 	footer := renderHelpFooter(a.styles, a.permissionMode == permissionFullAuto, a.verboseTools, width)

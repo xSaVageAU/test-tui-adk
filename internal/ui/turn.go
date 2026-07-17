@@ -41,25 +41,68 @@ func (a *App) handleSend() tea.Cmd {
 }
 
 func (a *App) sendMessage(text string) tea.Cmd {
-	a.messages = append(a.messages, ChatMessage{Role: RoleUser, Content: text, At: time.Now()})
-	a.lastPromptText = text
 	a.input.SetValue("")
 	a.layout()
-	// Sending is a deliberate action, unlike the steady trickle of
-	// keystroke-driven refreshes elsewhere — always follow it to the
-	// bottom even if you'd scrolled up to read history first.
-	a.viewport.GotoBottom()
 
 	if a.backend == nil {
 		// Held rather than dropped or errored: the /key popup opens right
 		// here, and the keySetMsg handler in Update sends this same text
-		// the moment a key is successfully set.
+		// the moment a key is successfully set. Appended to the
+		// transcript right away, unlike the queued case below — there's
+		// no turn to hide behind here, the message is just waiting on a
+		// key, not competing with one already in flight.
+		a.messages = append(a.messages, ChatMessage{Role: RoleUser, Content: text, At: time.Now()})
+		a.lastPromptText = text
+		a.viewport.GotoBottom()
 		a.pendingMessage = text
 		a.openKeyProviderMenu()
 		return nil
 	}
 
+	// A turn already running (streaming, a plain blocking Send, or paused
+	// on a HITL confirmation) means dispatching now would race it — two
+	// concurrent calls would both write through the single shared
+	// turnCancel/streamChan/streamingMsgIndex, corrupting whichever one
+	// loses. Queue instead, without touching the transcript at all — only
+	// the pinned queuedPromptOverlay (transcript.go) shows it exists until
+	// popQueuedMessage below actually sends it, at which point it appears
+	// in the transcript for the first time, exactly as if it had just
+	// been typed.
+	if a.turnInProgress() {
+		a.queuedMessages = append(a.queuedMessages, text)
+		return nil
+	}
+
+	return a.sendNow(text)
+}
+
+// sendNow is the actual "send" step — append text as a fresh user
+// message and dispatch it — shared by sendMessage's immediate-send path
+// and popQueuedMessage, which reaches here once the turn that was
+// blocking a queued message has genuinely ended.
+func (a *App) sendNow(text string) tea.Cmd {
+	a.messages = append(a.messages, ChatMessage{Role: RoleUser, Content: text, At: time.Now()})
+	a.lastPromptText = text
+	// Sending is a deliberate action, unlike the steady trickle of
+	// keystroke-driven refreshes elsewhere — always follow it to the
+	// bottom even if you'd scrolled up to read history first.
+	a.viewport.GotoBottom()
 	return a.dispatchToBackend(text)
+}
+
+// popQueuedMessage sends the next message queued by sendMessage (or set
+// by /interrupt), if any — called from every place a turn genuinely
+// concludes: a normal finish, an error, or a stop, but *not* a HITL
+// pause (turnInProgress is still true then; resolveConfirmation's own
+// resumption is what eventually reaches one of those real endings).
+// Returns nil, a no-op, when nothing's queued.
+func (a *App) popQueuedMessage() tea.Cmd {
+	if len(a.queuedMessages) == 0 {
+		return nil
+	}
+	next := a.queuedMessages[0]
+	a.queuedMessages = a.queuedMessages[1:]
+	return a.sendNow(next)
 }
 
 // dispatchToBackend sends text to the current backend, streamed or in one
@@ -107,6 +150,42 @@ func (a *App) dispatchToBackend(text string) tea.Cmd {
 func (a *App) stopTurn() {
 	a.turnCancel()
 	a.systemMessage("Stopping...")
+}
+
+// interruptAndSend is /interrupt's handler — stop whatever's running
+// right now and, if given a prompt, redirect to it the instant that
+// stop actually lands. Unlike sendMessage's own queuing (which waits
+// politely for the current turn to finish), this replaces the queue
+// outright: redirecting means skipping whatever else was already
+// waiting, not getting in line behind it.
+//
+// A HITL pause has no live network call for turnCancel to cancel — the
+// run is blocked on us, not blocked on the backend — so that case is
+// handled the same way ctrl+c already treats it (see keyrouting.go's
+// handleKey): deny the pending confirmation. Whatever the agent does in
+// response to that denial still ends up at one of popQueuedMessage's
+// call sites eventually, so the redirect fires once things genuinely
+// settle either way.
+func (a *App) interruptAndSend(prompt string) tea.Cmd {
+	if !a.turnInProgress() {
+		if prompt == "" {
+			return nil // nothing running, nothing to redirect to either
+		}
+		return a.sendMessage(prompt)
+	}
+
+	if prompt != "" {
+		a.queuedMessages = []string{prompt} // replaces, doesn't append — see the doc comment above
+	}
+
+	var cmd tea.Cmd
+	if a.pendingConfirmation != nil {
+		cmd = a.resolveConfirmation(false)
+	} else {
+		a.stopTurn()
+	}
+	a.followTranscript()
+	return cmd
 }
 
 type agentReplyMsg struct {

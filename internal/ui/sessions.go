@@ -10,16 +10,29 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// turnInProgress reports whether a turn is actively streaming or paused
-// on a HITL confirmation — either way it's mid-flight against the
-// *current* a.sessionID, so switching sessions out from under it would
-// mean a stale streamChunkMsg or resolveConfirmation call landing on the
-// wrong session (or a freshly-reset, unrelated transcript). /new and
+// turnInProgress reports whether a turn is actively running (streaming
+// or a plain blocking Send — see the note below) or paused on a HITL
+// confirmation — either way it's mid-flight against the *current*
+// a.sessionID, so switching sessions out from under it would mean a
+// stale streamChunkMsg or resolveConfirmation call landing on the wrong
+// session (or a freshly-reset, unrelated transcript). /new and
 // /sessions both refuse while this is true rather than trying to cancel
-// and switch — cancelling an in-flight turn cleanly is a separate,
-// not-yet-built feature (see the interrupt-and-redirect idea).
+// and switch — cancelling an in-flight turn cleanly is a separate
+// feature (see /interrupt in turn.go).
+//
+// Checks turnCancel rather than streamChan for two reasons, not just
+// one: streamChan is never set at all in non-streaming (Send) mode, so
+// the old streamChan-based check silently reported "not busy" for the
+// whole duration of a non-streaming turn — a real gap, not just an
+// asymmetry. turnCancel also covers both modes and, just as importantly,
+// is set *synchronously* the moment dispatchToBackend runs, before its
+// tea.Cmd even starts — streamChan only becomes non-nil once
+// streamStartMsg lands, a whole async round trip later. Checking
+// streamChan left a real window, between calling dispatchToBackend and
+// that message arriving, where a second send would race the first
+// (see sendMessage's own turnInProgress guard) instead of being queued.
 func (a *App) turnInProgress() bool {
-	return a.streamChan != nil || a.pendingConfirmation != nil
+	return a.turnCancel != nil || a.pendingConfirmation != nil
 }
 
 // resetTranscriptState clears everything tied to the conversation
@@ -33,6 +46,7 @@ func (a *App) resetTranscriptState() {
 	a.pendingConfirmation = nil
 	a.confirmQueue = nil
 	a.confirmDecisions = nil
+	a.queuedMessages = nil
 	a.turnCancel = nil
 	a.turnUsage, a.turnFinishReason = nil, ""
 	a.contextUsed = 0

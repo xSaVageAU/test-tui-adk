@@ -265,13 +265,30 @@ func finishReasonText(reason string) (text string, blocked bool) {
 const stickyPromptMaxLines = 3
 
 // renderStickyPrompt draws the pinned "you: ..." strip shown when the
-// last prompt has scrolled out of view — word-wrapped up to
-// stickyPromptMaxLines rather than hard-truncated to one line, so more of
-// a longer prompt is actually readable. Only past that cap does it fall
-// back to an ellipsis, on the last row. Filled to the full width so it
-// reads as a solid strip overlaid on the content, not text floating over
-// whatever was there.
+// last prompt has scrolled out of view. See renderPinnedStrip for the
+// shared word-wrap/truncate shape — this just supplies StickyPrompt's
+// styling and wording.
 func renderStickyPrompt(s theme.Styles, promptText string, width int) string {
+	return renderPinnedStrip(s.StickyPrompt, "you: ", promptText, width)
+}
+
+// renderQueuedPrompt draws the pinned "queued: ..." strip shown at the
+// bottom of the chat while a message is waiting to send (see
+// App.queuedPromptOverlay) — same shape as renderStickyPrompt, but this
+// isn't "here's what you already asked," it's "here's what's about to go
+// out," hence its own wording and QueuedPrompt's distinct (Attention-
+// colored) styling.
+func renderQueuedPrompt(s theme.Styles, promptText string, width int) string {
+	return renderPinnedStrip(s.QueuedPrompt, "queued: ", promptText, width)
+}
+
+// renderPinnedStrip is renderStickyPrompt/renderQueuedPrompt's shared
+// shape: word-wrapped up to stickyPromptMaxLines rather than
+// hard-truncated to one line, so more of a longer prompt is actually
+// readable — only past that cap does it fall back to an ellipsis, on
+// the last row. Filled to the full width so it reads as a solid strip
+// overlaid on the content, not text floating over whatever was there.
+func renderPinnedStrip(style lipgloss.Style, prefix, promptText string, width int) string {
 	flat := strings.ReplaceAll(strings.TrimSpace(promptText), "\n", " ")
 
 	// Word-wrap unstyled first so line count and per-line truncation can
@@ -279,7 +296,7 @@ func renderStickyPrompt(s theme.Styles, promptText string, width int) string {
 	// pass — same reasoning as everywhere else in this app that a style's
 	// Background needs to be applied after the content is already at
 	// its final per-line width, not before.
-	lines := strings.Split(lipgloss.NewStyle().Width(width).Render("you: "+flat), "\n")
+	lines := strings.Split(lipgloss.NewStyle().Width(width).Render(prefix+flat), "\n")
 
 	if len(lines) > stickyPromptMaxLines {
 		lines = lines[:stickyPromptMaxLines]
@@ -287,5 +304,5 @@ func renderStickyPrompt(s theme.Styles, promptText string, width int) string {
 		lines[len(lines)-1] = ansi.Truncate(last, width-1, "") + "…"
 	}
 
-	return s.StickyPrompt.Width(width).Render(strings.Join(lines, "\n"))
+	return style.Width(width).Render(strings.Join(lines, "\n"))
 }

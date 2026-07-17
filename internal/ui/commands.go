@@ -29,8 +29,15 @@ var commandSpecs = []commandSpec{
 	{Name: "key", Desc: "Set a provider API key"},
 	{Name: "agents", Desc: "Configure agent provider/model"},
 	{Name: "loader", Desc: "Choose the \"working\" animation"},
+	{Name: "interrupt", Desc: "Stop the current response, optionally with a new prompt"},
 	{Name: "exit", Desc: "Quit the app"},
 }
+
+// interruptCommandName is /interrupt's registry name — pulled out as a
+// const since runCommand also has to recognize "interrupt <prompt>"
+// as its own shape, not just the bare command matchCommands/the switch
+// below already handle.
+const interruptCommandName = "interrupt"
 
 // commandQuery returns the text after a leading "/" in the input box, and
 // whether the input is currently in "typing a command" mode at all.
@@ -81,7 +88,22 @@ func renderSuggestions(s theme.Styles, matches []commandSpec, selected, width in
 // has anything to show; every other command acts synchronously and
 // returns nil.
 func (a *App) runCommand(name string) tea.Cmd {
-	switch strings.ToLower(strings.TrimSpace(name)) {
+	trimmed := strings.TrimSpace(name)
+	lower := strings.ToLower(trimmed)
+
+	// /interrupt is the one command that takes a free-text argument (the
+	// redirect prompt), so it can't go through the bare-word switch
+	// below like every other command — matched here first, against both
+	// its bare form and "interrupt <anything>", the argument's own
+	// casing left untouched since it's about to become chat text.
+	switch {
+	case lower == interruptCommandName:
+		return a.interruptAndSend("")
+	case strings.HasPrefix(lower, interruptCommandName+" "):
+		return a.interruptAndSend(strings.TrimSpace(trimmed[len(interruptCommandName)+1:]))
+	}
+
+	switch lower {
 	case "new":
 		a.startNewSession()
 	case "sessions":
@@ -102,7 +124,7 @@ func (a *App) runCommand(name string) tea.Cmd {
 		// quits immediately regardless of what else is going on.
 		return tea.Quit
 	default:
-		a.systemMessage("Unknown command: /" + name + " — try /new, /sessions, /theme, /settings, /key, /agents, /loader, or /exit.")
+		a.systemMessage("Unknown command: /" + name + " — try /new, /sessions, /theme, /settings, /key, /agents, /loader, /interrupt, or /exit.")
 	}
 	return nil
 }
