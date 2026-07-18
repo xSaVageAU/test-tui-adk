@@ -1,3 +1,4 @@
 *.exe
 *.test
 /dist/
+/docs/agent-memory/
