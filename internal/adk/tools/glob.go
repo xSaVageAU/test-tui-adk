@@ -53,21 +53,17 @@ func globFiles(_ agent.Context, args globArgs) (globResult, error) {
 	}
 
 	var files []string
-	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	walkErr := target().Walk(root, func(path string, info fs.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
-		if d.IsDir() {
-			if d.Name() == ".git" {
+		if info.IsDir() {
+			if info.Name() == ".git" {
 				return fs.SkipDir
 			}
 			return nil
 		}
-		rel, relErr := filepath.Rel(root, path)
-		if relErr != nil {
-			rel = path
-		}
-		rel = filepath.ToSlash(rel)
+		rel := relPath(root, path)
 		if re.MatchString(rel) {
 			files = append(files, rel)
 			if len(files) >= globMaxResults {
@@ -81,6 +77,21 @@ func globFiles(_ agent.Context, args globArgs) (globResult, error) {
 	}
 	sort.Strings(files)
 	return globResult{Files: files}, nil
+}
+
+// relPath returns path relative to root using slash separators. It's
+// deliberately separator-agnostic (string prefix trimming, not
+// filepath.Rel) so it works for both the local target's OS-separator walk
+// output and an SSH target's slash paths — filepath.Rel would mangle a
+// remote "/home/x" path on a Windows host. Falls back to the slash form
+// of path when it isn't under root.
+func relPath(root, path string) string {
+	p := filepath.ToSlash(path)
+	r := strings.TrimSuffix(filepath.ToSlash(root), "/")
+	if rel, ok := strings.CutPrefix(p, r+"/"); ok {
+		return rel
+	}
+	return p
 }
 
 // globToRegexp translates a glob (with '*', '?', and '**') into an

@@ -3,9 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
-	"time"
 
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/tool"
@@ -70,9 +68,9 @@ func runShell(_ agent.Context, args runShellArgs) (runShellResult, error) {
 	}
 
 	if args.Background {
-		id, err := startBackground(args.Command, args.WorkingDir)
+		id, err := target().StartBackground(args.Command, args.WorkingDir)
 		if err != nil {
-			return runShellResult{}, err
+			return runShellResult{}, fmt.Errorf("run_shell: %w", err)
 		}
 		return runShellResult{
 			ShellID: id,
@@ -85,33 +83,16 @@ func runShell(_ agent.Context, args runShellArgs) (runShellResult, error) {
 		timeout = runShellDefaultTimeout
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
-	defer cancel()
-
-	// shellCmd is platform-specific (run_shell_windows.go / _other.go):
-	// the Windows build must construct the raw command line itself to
-	// avoid Go's argv escaping mangling embedded quotes — see those files.
-	cmd := shellCmd(ctx, args.Command)
-	if args.WorkingDir != "" {
-		cmd.Dir = args.WorkingDir
-	}
-	out, err := cmd.CombinedOutput()
-	output := truncateOutput(string(out), runShellMaxOutput)
-
-	if ctx.Err() == context.DeadlineExceeded {
-		return runShellResult{Output: output, ExitCode: -1}, fmt.Errorf("run_shell: command timed out after %ds", timeout)
-	}
-	// A non-zero exit is normal command behavior (a failing test, a
-	// compile error), not a tool failure — report it in ExitCode and
-	// return the output with no Go error, so the model sees the result
-	// and can react rather than treating it as the tool breaking.
+	// target() routes to the local host or a remote SSH machine — see
+	// target.go. The non-zero-exit vs error distinction is the target's
+	// contract: err is only a timeout or a failure to start the command,
+	// never just a non-zero exit (which comes back in res.ExitCode).
+	res, err := target().Run(context.Background(), args.Command, args.WorkingDir, timeout)
+	output := truncateOutput(res.Output, runShellMaxOutput)
 	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			return runShellResult{Output: output, ExitCode: ee.ExitCode()}, nil
-		}
-		return runShellResult{Output: output, ExitCode: -1}, fmt.Errorf("run_shell: %w", err)
+		return runShellResult{Output: output, ExitCode: res.ExitCode}, fmt.Errorf("run_shell: %w", err)
 	}
-	return runShellResult{Output: output, ExitCode: 0}, nil
+	return runShellResult{Output: output, ExitCode: res.ExitCode}, nil
 }
 
 // truncateOutput caps captured output so a chatty command can't flood the

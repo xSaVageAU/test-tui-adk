@@ -240,6 +240,15 @@ type App struct {
 	setAgentTools    func(id string, tools []string) error
 	listTools        func() ([]ToolSummary, error)
 
+	// targetType is the execution target the tools run against — "host"
+	// or "ssh" (see settings.TargetSettings). configureTarget re-installs
+	// the target from settings after targetType changes and returns a
+	// description of the now-active target, or an error if (e.g.) the SSH
+	// connection failed; nil disables the /settings target row, same
+	// nil-disables convention as the closures above.
+	targetType      string
+	configureTarget func() (string, error)
+
 	suggestMatches []commandSpec // live "/command" matches for the current input, if any
 	suggestIndex   int
 
@@ -312,6 +321,21 @@ type AppConfig struct {
 	// selected. nil disables the "Tools" row entirely, same convention
 	// as the four above.
 	ListTools func() ([]ToolSummary, error)
+	// ConfigureTarget re-installs the tool execution target (local host
+	// or a remote SSH machine) from settings, returning a description of
+	// the now-active target or an error establishing it — backs the
+	// /settings "Tool execution target" row. nil disables that row.
+	ConfigureTarget func() (string, error)
+}
+
+// normalizeTargetType maps a settings target type to the two the UI
+// toggles between — anything that isn't "ssh" (including "", an older
+// settings file) is "host", matching ConfigureTarget's own fail-safe.
+func normalizeTargetType(s string) string {
+	if s == settings.TargetSSH {
+		return settings.TargetSSH
+	}
+	return settings.TargetHost
 }
 
 // NewApp constructs the app with the default (first-registered) theme
@@ -358,6 +382,8 @@ func NewApp(cfg AppConfig) *App {
 		setAgentModel:       cfg.SetAgentModel,
 		setAgentTools:       cfg.SetAgentTools,
 		listTools:           cfg.ListTools,
+		targetType:          normalizeTargetType(agentSettings.Target.Type),
+		configureTarget:     cfg.ConfigureTarget,
 		workingAnim:         newWorkingAnimState(parseWorkingAnimVariant(uiSettings.WorkingAnim)),
 		workingLabel:        "thinking",
 	}

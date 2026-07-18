@@ -224,6 +224,12 @@ func (a *App) openAgentSettingsMenu() {
 	items := []paletteItem{
 		{id: "permission", title: "Tool approval mode", desc: a.permissionMode.String() + " — select to cycle"},
 	}
+	// The execution-target row only appears when the app was wired with a
+	// ConfigureTarget closure (main.go always is; a test/embedding harness
+	// may not be) — same nil-disables convention as the /agents rows.
+	if a.configureTarget != nil {
+		items = append(items, paletteItem{id: "target", title: "Tool execution target", desc: a.targetType + " — select to cycle"})
+	}
 	a.openMenu(paletteSettingsAgent, "Agent Settings", items)
 }
 
@@ -315,7 +321,11 @@ func (a *App) confirmMenuSelection(id string) (bool, tea.Cmd) {
 			a.toggleSetting(id)
 		}
 	case paletteSettingsAgent:
-		a.toggleSetting(id)
+		if id == "target" {
+			a.cycleExecutionTarget()
+		} else {
+			a.toggleSetting(id)
+		}
 	case paletteSessions:
 		return true, a.switchSession(id)
 	case paletteConfirmDeleteSession:
@@ -349,6 +359,38 @@ func (a *App) confirmMenuSelection(id string) (bool, tea.Cmd) {
 func (a *App) previewTheme(name string) {
 	a.themeMgr.Set(name)
 	a.applyTheme()
+}
+
+// cycleExecutionTarget flips the tool execution target between host and
+// ssh, persists it, then re-installs the target from settings and reports
+// the outcome. The new type is persisted *before* configureTarget runs
+// because that reads the target config back from disk (see
+// tools.ConfigureTarget). On an SSH failure it reverts to host so the
+// persisted/displayed state matches the local fallback the tools actually
+// got, rather than claiming "ssh" while running locally.
+func (a *App) cycleExecutionTarget() {
+	if a.configureTarget == nil {
+		return
+	}
+	if a.targetType == settings.TargetSSH {
+		a.targetType = settings.TargetHost
+	} else {
+		a.targetType = settings.TargetSSH
+	}
+	a.persistSettings()
+
+	desc, err := a.configureTarget()
+	if err != nil {
+		a.status = theme.StatusError
+		a.systemMessage("Execution target failed: " + err.Error() + " — staying on host.")
+		if a.targetType != settings.TargetHost {
+			a.targetType = settings.TargetHost
+			a.persistSettings()
+		}
+	} else {
+		a.systemMessage("Tools now running on: " + desc)
+	}
+	a.refreshTranscript()
 }
 
 func (a *App) toggleSetting(id string) {
@@ -436,9 +478,12 @@ func (a *App) persistSettings() {
 		PopupHeight:         a.popupHeight,
 		ToolPreviewMaxLines: a.toolPreviewMaxLines,
 	}
-	s.Agent = settings.AgentSettings{
-		PermissionMode: a.permissionMode.String(),
-	}
+	// Mutate the loaded Agent section in place rather than replacing it,
+	// so fields the UI doesn't own here — the whole Target block (its SSH
+	// host/user/key are edited in settings.toml by hand, not in /settings)
+	// — survive a settings write instead of being clobbered.
+	s.Agent.PermissionMode = a.permissionMode.String()
+	s.Agent.Target.Type = a.targetType
 	_ = settings.Save(s)
 }
 

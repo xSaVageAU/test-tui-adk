@@ -99,7 +99,46 @@ type AgentSettings struct {
 	// existed) is treated as ModeNormal — deliberately fail-safe rather
 	// than needing its own explicit "missing/malformed" handling here.
 	PermissionMode string `toml:"permissionMode"`
+
+	// Target selects where the agent's tools actually run — the local
+	// host (the default) or a remote machine over SSH. See TargetSettings
+	// and internal/adk/tools/target.go, the consumer of this value.
+	Target TargetSettings `toml:"target,omitempty"`
 }
+
+// TargetSettings selects the execution target for every tool. Type
+// "host" (or "", the default) runs everything locally; "ssh" runs
+// commands over a persistent SSH connection and does file operations over
+// SFTP, using the SSH block below. Kept as its own struct so more target
+// kinds (container, remote agent, ...) can slot in later — see the
+// tool-execution-targets memory for the fuller intent.
+type TargetSettings struct {
+	Type string      `toml:"type,omitempty"` // "host" (default) or "ssh"
+	SSH  SSHSettings `toml:"ssh,omitempty"`
+}
+
+// SSHSettings is the connection detail for an "ssh" target. Auth is by
+// private key only (no passwords stored on disk): KeyPath, or the first
+// of ~/.ssh/id_ed25519 / ~/.ssh/id_rsa if unset. Host keys are verified
+// against known_hosts (KnownHosts, or ~/.ssh/known_hosts) unless
+// InsecureSkipHostKey is set — so a first connection to an unknown host
+// fails with a clear message rather than silently trusting it.
+type SSHSettings struct {
+	Host                string `toml:"host,omitempty"`
+	Port                int    `toml:"port,omitempty"` // default 22
+	User                string `toml:"user,omitempty"`
+	KeyPath             string `toml:"keyPath,omitempty"`
+	KnownHosts          string `toml:"knownHosts,omitempty"`
+	InsecureSkipHostKey bool   `toml:"insecureSkipHostKey,omitempty"`
+}
+
+// TargetHost/TargetSSH are TargetSettings.Type's valid values. "" is
+// treated as TargetHost (fail-safe: an older settings file, or one that
+// never set a target, runs locally).
+const (
+	TargetHost = "host"
+	TargetSSH  = "ssh"
+)
 
 // ModeNormal/ModeFullAuto are PermissionMode's only two valid values —
 // pre-defined, not yet user-customizable per-tool (see the
@@ -151,8 +190,12 @@ func Load() Settings {
 	if s.UI.HITLMode == "" {
 		s.UI = DefaultUISettings()
 	}
+	// Default only the empty field, not the whole Agent section — a file
+	// that sets [agent.target] but omits permissionMode (e.g. hand-edited
+	// to add an SSH target) must keep its Target block, not have it wiped
+	// by a blanket reset to DefaultAgentSettings().
 	if s.Agent.PermissionMode == "" {
-		s.Agent = DefaultAgentSettings()
+		s.Agent.PermissionMode = ModeNormal
 	}
 	return s
 }

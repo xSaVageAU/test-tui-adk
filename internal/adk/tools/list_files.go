@@ -2,7 +2,6 @@ package tools
 
 import (
 	"fmt"
-	"os"
 	"sort"
 
 	"google.golang.org/adk/v2/agent"
@@ -49,7 +48,7 @@ func listFiles(_ agent.Context, args listFilesArgs) (listFilesResult, error) {
 		dir = "."
 	}
 
-	entries, err := os.ReadDir(dir)
+	entries, err := target().ReadDir(dir)
 	if err != nil {
 		return listFilesResult{}, fmt.Errorf("read dir %q: %w", dir, err)
 	}

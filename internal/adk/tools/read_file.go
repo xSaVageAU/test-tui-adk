@@ -2,7 +2,6 @@ package tools
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"google.golang.org/adk/v2/agent"
@@ -38,7 +37,7 @@ type readFileResult struct {
 }
 
 func readFile(_ agent.Context, args readFileArgs) (readFileResult, error) {
-	data, err := os.ReadFile(args.Path)
+	data, err := target().ReadFile(args.Path)
 	if err != nil {
 		return readFileResult{}, fmt.Errorf("read file %q: %w", args.Path, err)
 	}

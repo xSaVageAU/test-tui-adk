@@ -128,6 +128,16 @@ func buildRootAgent(ctx context.Context, callerProvider, callerAPIKey string) (b
 // this package's exported surface.
 func ShutdownBackgroundProcesses() { tools.ShutdownBackground() }
 
+// ConfigureExecutionTarget installs the execution target (local host or a
+// remote SSH machine) from settings, returning a short description of the
+// active target and any error establishing it. Thin re-export of
+// tools.ConfigureTarget — same seam as ShutdownBackgroundProcesses.
+func ConfigureExecutionTarget() (string, error) { return tools.ConfigureTarget() }
+
+// CloseExecutionTarget closes the active execution target (an SSH/SFTP
+// connection) as the app exits.
+func CloseExecutionTarget() { tools.CloseTarget() }
+
 // rootInstructionFor appends a generated "Available specialists" list
 // (name plus description, in loadSubAgentConfigs' order) to base — the
 // root's own instruction.md content — so the root always knows what it

@@ -2,7 +2,7 @@ package tools
 
 import (
 	"fmt"
-	"os"
+	"io/fs"
 	"strings"
 
 	"google.golang.org/adk/v2/agent"
@@ -47,7 +47,7 @@ func editFile(_ agent.Context, args editFileArgs) (editFileResult, error) {
 	if args.OldString == args.NewString {
 		return editFileResult{}, fmt.Errorf("edit file %q: old_string and new_string are identical — nothing to change", args.Path)
 	}
-	data, err := os.ReadFile(args.Path)
+	data, err := target().ReadFile(args.Path)
 	if err != nil {
 		return editFileResult{}, fmt.Errorf("edit file %q: %w", args.Path, err)
 	}
@@ -72,11 +72,11 @@ func editFile(_ agent.Context, args editFileArgs) (editFileResult, error) {
 	// Preserve the file's existing permission bits rather than forcing
 	// 0o644 the way write_file's create path does — this edits a file
 	// that already exists, so its mode is the user's, not ours to reset.
-	mode := os.FileMode(0o644)
-	if info, statErr := os.Stat(args.Path); statErr == nil {
+	mode := fs.FileMode(0o644)
+	if info, statErr := target().Stat(args.Path); statErr == nil {
 		mode = info.Mode().Perm()
 	}
-	if err := os.WriteFile(args.Path, []byte(updated), mode); err != nil {
+	if err := target().WriteFile(args.Path, []byte(updated), mode); err != nil {
 		return editFileResult{}, fmt.Errorf("edit file %q: %w", args.Path, err)
 	}
 	return editFileResult{Replacements: count}, nil

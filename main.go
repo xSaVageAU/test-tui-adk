@@ -74,6 +74,16 @@ func listTools() ([]ui.ToolSummary, error) {
 	return out, nil
 }
 
+// joinNotes combines two boot-note fragments, keeping both when the first
+// is already set rather than one overwriting the other (the single note
+// string is shown as-is in the boot banner).
+func joinNotes(existing, add string) string {
+	if existing == "" {
+		return add
+	}
+	return existing + "\n" + add
+}
+
 func main() {
 	ctx := context.Background()
 
@@ -117,6 +127,18 @@ func main() {
 		note = fmt.Sprintf("Could not connect with %s: %v. Use /key to try again.", keySource, err)
 	}
 
+	// Install the execution target (local host, or a remote SSH machine if
+	// settings select one) before the user can send anything that runs a
+	// tool. An SSH failure leaves tools on the local host, so surface it —
+	// the user should know their remote target didn't take effect rather
+	// than silently operating on the wrong machine. Appended so it doesn't
+	// clobber a connection/config note set above.
+	if desc, terr := adk.ConfigureExecutionTarget(); terr != nil {
+		note = joinNotes(note, "Execution target: "+terr.Error()+" — tools will run on the local host until fixed.")
+	} else if desc != "" && desc != "host" {
+		note = joinNotes(note, "Tools are running on "+desc)
+	}
+
 	app := ui.NewApp(ui.AppConfig{
 		Backend:          backend,
 		BackendNote:      note,
@@ -129,6 +151,7 @@ func main() {
 		SetAgentModel:    adk.SetAgentModel,
 		SetAgentTools:    adk.SetAgentTools,
 		ListTools:        listTools,
+		ConfigureTarget:  adk.ConfigureExecutionTarget,
 	})
 
 	// AltScreen and MouseMode are set on the tea.View returned from
@@ -142,6 +165,9 @@ func main() {
 	// because the os.Exit below on the error path would skip deferred
 	// cleanup.
 	adk.ShutdownBackgroundProcesses()
+	// Close the execution target too (an SSH/SFTP connection, if one was
+	// installed) so it doesn't linger past the TUI.
+	adk.CloseExecutionTarget()
 	if runErr != nil {
 		fmt.Fprintln(os.Stderr, "error:", runErr)
 		os.Exit(1)

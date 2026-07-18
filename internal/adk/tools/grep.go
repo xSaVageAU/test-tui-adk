@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -69,25 +68,25 @@ func grep(_ agent.Context, args grepArgs) (grepResult, error) {
 	}
 
 	// errStop stops the walk once we've collected enough matches —
-	// WalkDir has no other way to break out early.
+	// Walk has no other way to break out early.
 	errStop := errors.New("match cap reached")
 	var matches []string
-	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	walkErr := target().Walk(root, func(path string, info fs.FileInfo, err error) error {
 		if err != nil {
 			return nil // skip unreadable entries rather than aborting the whole search
 		}
-		if d.IsDir() {
-			if d.Name() == ".git" {
+		if info.IsDir() {
+			if info.Name() == ".git" {
 				return fs.SkipDir
 			}
 			return nil
 		}
 		if args.Glob != "" {
-			if ok, _ := filepath.Match(args.Glob, d.Name()); !ok {
+			if ok, _ := filepath.Match(args.Glob, info.Name()); !ok {
 				return nil
 			}
 		}
-		if info, statErr := d.Info(); statErr == nil && info.Size() > grepMaxFileSize {
+		if info.Size() > grepMaxFileSize {
 			return nil
 		}
 		lines, ferr := grepFile(path, re, grepMaxMatches-len(matches))
@@ -113,7 +112,7 @@ func grepFile(path string, re *regexp.Regexp, max int) ([]string, error) {
 	if max <= 0 {
 		return nil, nil
 	}
-	f, err := os.Open(path)
+	f, err := target().Open(path)
 	if err != nil {
 		return nil, err
 	}

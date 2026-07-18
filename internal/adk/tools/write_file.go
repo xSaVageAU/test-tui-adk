@@ -2,7 +2,6 @@ package tools
 
 import (
 	"fmt"
-	"os"
 
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/tool"
@@ -39,7 +38,7 @@ type writeFileResult struct {
 }
 
 func writeFile(_ agent.Context, args writeFileArgs) (writeFileResult, error) {
-	if err := os.WriteFile(args.Path, []byte(args.Content), 0o644); err != nil {
+	if err := target().WriteFile(args.Path, []byte(args.Content), 0o644); err != nil {
 		return writeFileResult{}, fmt.Errorf("write file %q: %w", args.Path, err)
 	}
 	return writeFileResult{BytesWritten: len(args.Content)}, nil
