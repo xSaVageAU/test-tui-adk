@@ -26,7 +26,7 @@ func init() {
 		build: func() (tool.Tool, error) {
 			return functiontool.New(functiontool.Config{
 				Name:        "edit_file",
-				Description: "Replaces an exact block of text in an existing file. old_string must match the file verbatim (including whitespace and indentation) and, unless replace_all is true, must be unique in the file — otherwise the edit is rejected. Do not include the line-number prefixes that read_file adds; match the raw file text.",
+				Description: "Replaces an exact block of text in an existing file. old_string must match the file verbatim (including whitespace and indentation) and, unless replace_all is true, must be unique in the file — otherwise the edit is rejected. Copy old_string directly from read_file's output rather than retyping it, so whitespace matches exactly (tabs vs spaces and trailing spaces are common mismatches); do not include the line-number prefixes read_file adds.",
 			}, editFile)
 		},
 	})
@@ -34,7 +34,7 @@ func init() {
 
 type editFileArgs struct {
 	Path       string `json:"path" jsonschema:"Path of the file to edit, relative or absolute."`
-	OldString  string `json:"old_string" jsonschema:"The exact text to replace. Must appear verbatim in the file, and must be unique unless replace_all is true."`
+	OldString  string `json:"old_string" jsonschema:"The exact text to replace, copied verbatim from read_file's output to preserve whitespace. Must appear verbatim in the file, and must be unique unless replace_all is true."`
 	NewString  string `json:"new_string" jsonschema:"The text to replace it with. Use an empty string to delete old_string."`
 	ReplaceAll bool   `json:"replace_all,omitempty" jsonschema:"Replace every occurrence of old_string instead of requiring exactly one match."`
 }
@@ -56,7 +56,7 @@ func editFile(_ agent.Context, args editFileArgs) (editFileResult, error) {
 	count := strings.Count(content, args.OldString)
 	switch {
 	case count == 0:
-		return editFileResult{}, fmt.Errorf("edit file %q: old_string not found in file", args.Path)
+		return editFileResult{}, notFoundError(args.Path, content, args.OldString)
 	case count > 1 && !args.ReplaceAll:
 		return editFileResult{}, fmt.Errorf("edit file %q: old_string is not unique (%d matches) — add surrounding context to make it unique, or set replace_all", args.Path, count)
 	}
@@ -85,4 +85,51 @@ func editFile(_ agent.Context, args editFileArgs) (editFileResult, error) {
 func editFileResources(args map[string]any) []resourceRef {
 	path, _ := args["path"].(string)
 	return []resourceRef{fileRef(path, true)}
+}
+
+// notFoundError explains why an exact match failed. The most common
+// cause by far is whitespace the model didn't reproduce exactly (tabs vs
+// spaces, trailing spaces, CRLF vs LF), which the bare "not found" gave
+// no clue about — the exact complaint the stress-test report raised. So
+// when a whitespace-insensitive match *does* exist, say so and point at
+// the line, turning a dead end into a one-retry fix. This only diagnoses;
+// it never relaxes the actual match (a whitespace-blind edit could patch
+// the wrong place — the whole reason exact matching exists).
+func notFoundError(path, content, oldString string) error {
+	if line := whitespaceMatchLine(content, oldString); line > 0 {
+		return fmt.Errorf("edit file %q: old_string not found exactly, but a whitespace-insensitive match exists near line %d — the file's whitespace differs from old_string's (likely tabs vs spaces, trailing spaces, or CRLF line endings). Re-copy old_string verbatim from read_file's output rather than retyping it", path, line)
+	}
+	return fmt.Errorf("edit file %q: old_string not found in file", path)
+}
+
+// whitespaceMatchLine reports the 1-based line where old_string matches
+// content ignoring whitespace differences, or 0 if there's no such match
+// (i.e. the text is genuinely absent, not just mis-whitespaced).
+func whitespaceMatchLine(content, oldString string) int {
+	normContent := normalizeWS(content)
+	normOld := normalizeWS(oldString)
+	if normOld == "" || !strings.Contains(normContent, normOld) {
+		return 0
+	}
+	// Locate it: find the content line whose normalized form equals the
+	// first normalized line of old_string.
+	first, _, _ := strings.Cut(normOld, "\n")
+	for i, ln := range strings.Split(normContent, "\n") {
+		if ln == first {
+			return i + 1
+		}
+	}
+	return 1
+}
+
+// normalizeWS collapses each line's whitespace to single spaces and trims
+// its ends (via strings.Fields, which also folds tabs into spaces) and
+// unifies CRLF to LF — so two texts that differ only in whitespace
+// normalize to the same string.
+func normalizeWS(s string) string {
+	lines := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
+	for i, ln := range lines {
+		lines[i] = strings.Join(strings.Fields(ln), " ")
+	}
+	return strings.Join(lines, "\n")
 }
