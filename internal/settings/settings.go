@@ -5,13 +5,19 @@
 // rather than JSON specifically because, unlike agent.json (mostly
 // written by the root agent or an interface, not hand-edited) and the
 // theme files, this is the one config surface meant to be comfortable to
-// edit by hand — comments and a lighter syntax are worth a dependency
-// here. It's a neutral package, like internal/appdir and internal/theme:
-// internal/ui both writes this (whenever a /settings toggle changes) and
-// reads it at startup.
+// edit by hand — a lighter syntax is worth a dependency here. Load
+// normalizes the file to the complete current schema on every read (see
+// Load), so every available option is always present as boilerplate to
+// fill in, and no field is silently absent; the trade-off is that the
+// file is machine-managed — hand-added comments aren't preserved (the
+// same as a /settings toggle already rewriting it via Save). It's a
+// neutral package, like internal/appdir and internal/theme: internal/ui
+// both writes this (whenever a /settings toggle changes) and reads it at
+// startup.
 package settings
 
 import (
+	"bytes"
 	"os"
 
 	"tui-testing/internal/appdir"
@@ -103,7 +109,7 @@ type AgentSettings struct {
 	// Target selects where the agent's tools actually run — the local
 	// host (the default) or a remote machine over SSH. See TargetSettings
 	// and internal/adk/tools/target.go, the consumer of this value.
-	Target TargetSettings `toml:"target,omitempty"`
+	Target TargetSettings `toml:"target"`
 }
 
 // TargetSettings selects the execution target for every tool. Type
@@ -112,9 +118,14 @@ type AgentSettings struct {
 // SFTP, using the SSH block below. Kept as its own struct so more target
 // kinds (container, remote agent, ...) can slot in later — see the
 // tool-execution-targets memory for the fuller intent.
+//
+// No omitempty on Target/SSH or their fields: the whole block is always
+// written to settings.toml (see Load's normalization) so a user switching
+// to SSH finds every field already scaffolded to fill in, rather than
+// having to know the schema and type it out.
 type TargetSettings struct {
-	Type string      `toml:"type,omitempty"` // "host" (default) or "ssh"
-	SSH  SSHSettings `toml:"ssh,omitempty"`
+	Type string      `toml:"type"` // "host" (default) or "ssh"
+	SSH  SSHSettings `toml:"ssh"`
 }
 
 // SSHSettings is the connection detail for an "ssh" target. Auth is by
@@ -124,20 +135,22 @@ type TargetSettings struct {
 // InsecureSkipHostKey is set — so a first connection to an unknown host
 // fails with a clear message rather than silently trusting it.
 type SSHSettings struct {
-	Host                string `toml:"host,omitempty"`
-	Port                int    `toml:"port,omitempty"` // default 22
-	User                string `toml:"user,omitempty"`
-	KeyPath             string `toml:"keyPath,omitempty"`
-	KnownHosts          string `toml:"knownHosts,omitempty"`
-	InsecureSkipHostKey bool   `toml:"insecureSkipHostKey,omitempty"`
+	Host                string `toml:"host"`
+	Port                int    `toml:"port"` // default DefaultSSHPort
+	User                string `toml:"user"`
+	KeyPath             string `toml:"keyPath"`
+	KnownHosts          string `toml:"knownHosts"`
+	InsecureSkipHostKey bool   `toml:"insecureSkipHostKey"`
 }
 
 // TargetHost/TargetSSH are TargetSettings.Type's valid values. "" is
 // treated as TargetHost (fail-safe: an older settings file, or one that
-// never set a target, runs locally).
+// never set a target, runs locally). DefaultSSHPort is the port used when
+// SSHSettings.Port is left 0.
 const (
-	TargetHost = "host"
-	TargetSSH  = "ssh"
+	TargetHost     = "host"
+	TargetSSH      = "ssh"
+	DefaultSSHPort = 22
 )
 
 // ModeNormal/ModeFullAuto are PermissionMode's only two valid values —
@@ -155,9 +168,18 @@ func DefaultUISettings() UISettings {
 	return UISettings{HighlightUser: true, StreamReplies: true, HITLMode: "modal"}
 }
 
-// DefaultAgentSettings is AgentSettings' equivalent of DefaultUISettings.
+// DefaultAgentSettings is AgentSettings' equivalent of DefaultUISettings —
+// including a fully-populated (host) Target block so a fresh settings.toml
+// already carries the whole [agent.target.ssh] scaffold, not just the
+// fields that happen to be non-zero.
 func DefaultAgentSettings() AgentSettings {
-	return AgentSettings{PermissionMode: ModeNormal}
+	return AgentSettings{
+		PermissionMode: ModeNormal,
+		Target: TargetSettings{
+			Type: TargetHost,
+			SSH:  SSHSettings{Port: DefaultSSHPort},
+		},
+	}
 }
 
 // Load reads settings.toml, falling back to DefaultUISettings()/
@@ -196,6 +218,25 @@ func Load() Settings {
 	// by a blanket reset to DefaultAgentSettings().
 	if s.Agent.PermissionMode == "" {
 		s.Agent.PermissionMode = ModeNormal
+	}
+	if s.Agent.Target.Type == "" {
+		s.Agent.Target.Type = TargetHost
+	}
+	if s.Agent.Target.SSH.Port == 0 {
+		s.Agent.Target.SSH.Port = DefaultSSHPort
+	}
+
+	// Normalize the file to the complete current schema: if the parsed-
+	// and-defaulted settings don't already reproduce the file byte-for-
+	// byte — because a config field was added since it was last written,
+	// or it was hand-edited into non-canonical form — rewrite it, so every
+	// available option is present as boilerplate to fill in rather than
+	// silently absent. Idempotent once canonical (Marshal reproduces it
+	// exactly, so nothing is rewritten). Best-effort, and hand-added
+	// comments aren't preserved through it — the file is machine-managed,
+	// the same as any /settings toggle already rewrites it via Save.
+	if canonical, err := toml.Marshal(s); err == nil && !bytes.Equal(canonical, data) {
+		_ = os.WriteFile(path, canonical, 0o644)
 	}
 	return s
 }

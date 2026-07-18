@@ -50,7 +50,14 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 			WorkingAnim:   "Bars",
 			PopupWidth:    70,
 		},
-		Agent: AgentSettings{PermissionMode: ModeFullAuto},
+		// Load defaults an unset target to host/DefaultSSHPort and writes
+		// the full block back (see Load's normalization), so a saved-then-
+		// loaded Settings comes back with that scaffold populated — reflect
+		// that here rather than the bare zero Target that was saved.
+		Agent: AgentSettings{
+			PermissionMode: ModeFullAuto,
+			Target:         TargetSettings{Type: TargetHost, SSH: SSHSettings{Port: DefaultSSHPort}},
+		},
 	}
 	if err := Save(want); err != nil {
 		t.Fatal(err)
