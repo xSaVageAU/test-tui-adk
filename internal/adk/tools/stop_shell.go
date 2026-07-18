@@ -37,17 +37,18 @@ type stopShellResult struct {
 }
 
 func stopShell(_ agent.Context, args stopShellArgs) (stopShellResult, error) {
-	p := lookupBg(args.ShellID)
-	if p == nil {
+	h := lookupBg(args.ShellID)
+	if h == nil {
 		return stopShellResult{}, fmt.Errorf("stop_shell: unknown shell id %q — it was never started, or belongs to a previous run", args.ShellID)
 	}
-	p.mu.Lock()
-	done := p.done
-	p.mu.Unlock()
-	if done {
+	running, _, rerr := h.running()
+	if rerr != nil {
+		return stopShellResult{}, fmt.Errorf("stop_shell: %w", rerr)
+	}
+	if !running {
 		return stopShellResult{Status: "already exited"}, nil
 	}
-	if err := killTree(p.cmd); err != nil {
+	if err := h.stop(); err != nil {
 		return stopShellResult{}, fmt.Errorf("stop_shell: %w", err)
 	}
 	return stopShellResult{Status: "stopped"}, nil

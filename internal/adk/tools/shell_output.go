@@ -39,16 +39,20 @@ type shellOutputResult struct {
 }
 
 func shellOutput(_ agent.Context, args shellOutputArgs) (shellOutputResult, error) {
-	p := lookupBg(args.ShellID)
-	if p == nil {
+	h := lookupBg(args.ShellID)
+	if h == nil {
 		return shellOutputResult{}, fmt.Errorf("shell_output: unknown shell id %q — it was never started, or belongs to a previous run", args.ShellID)
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	out := p.out.readNew()
-	if p.done {
-		return shellOutputResult{Output: out, Running: false, Status: fmt.Sprintf("exited (code %d)", p.exitCode)}, nil
+	out, err := h.readNew()
+	if err != nil {
+		return shellOutputResult{}, fmt.Errorf("shell_output: %w", err)
 	}
-	return shellOutputResult{Output: out, Running: true, Status: "running for " + time.Since(p.startedAt).Round(time.Second).String()}, nil
+	running, code, rerr := h.running()
+	if rerr != nil {
+		return shellOutputResult{}, fmt.Errorf("shell_output: %w", rerr)
+	}
+	if running {
+		return shellOutputResult{Output: out, Running: true, Status: "running for " + time.Since(h.startTime()).Round(time.Second).String()}, nil
+	}
+	return shellOutputResult{Output: out, Running: false, Status: fmt.Sprintf("exited (code %d)", code)}, nil
 }

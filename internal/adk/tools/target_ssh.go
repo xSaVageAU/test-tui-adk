@@ -126,10 +126,6 @@ func (t *sshTarget) Run(ctx context.Context, command, workingDir string, timeout
 	}
 }
 
-func (t *sshTarget) StartBackground(command, workingDir string) (string, error) {
-	return "", errors.New("background processes are not supported on SSH targets yet — run the command in the foreground, or switch the execution target back to host")
-}
-
 func (t *sshTarget) ReadFile(path string) ([]byte, error) {
 	f, err := t.sftp.Open(path)
 	if err != nil {
