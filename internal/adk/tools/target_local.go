@@ -60,6 +60,7 @@ func (localTarget) WriteFile(p string, d []byte, m fs.FileMode) error    { retur
 func (localTarget) Stat(path string) (fs.FileInfo, error)                { return os.Stat(path) }
 func (localTarget) ReadDir(path string) ([]fs.DirEntry, error)           { return os.ReadDir(path) }
 func (localTarget) Open(path string) (io.ReadCloser, error)              { return os.Open(path) }
+func (localTarget) Getwd() (string, error)                               { return os.Getwd() }
 func (localTarget) Close() error                                         { return nil }
 
 func (localTarget) Walk(root string, fn WalkFunc) error {

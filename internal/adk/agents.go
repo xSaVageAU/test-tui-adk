@@ -11,6 +11,7 @@ import (
 	"google.golang.org/adk/v2/tool/agenttool"
 
 	"tui-testing/internal/adk/tools"
+	"tui-testing/internal/ui"
 )
 
 // builtRoot is buildRootAgent's result — bundled into one struct rather
@@ -137,6 +138,20 @@ func ConfigureExecutionTarget() (string, error) { return tools.ConfigureTarget()
 // CloseExecutionTarget closes the active execution target (an SSH/SFTP
 // connection) as the app exits.
 func CloseExecutionTarget() { tools.CloseTarget() }
+
+// ListTargetDir lists one directory of the active execution target's
+// working tree for the webui's file-tree sidebar — thin re-export of
+// tools.ListDir mapped into ui's contract shape, same seam as
+// ConfigureExecutionTarget.
+func ListTargetDir(dir string) ui.TargetDirListing {
+	dl := tools.ListDir(dir)
+	out := ui.TargetDirListing{Root: dl.Root, Path: dl.Path, Truncated: dl.Truncated}
+	out.Entries = make([]ui.TargetDirEntry, len(dl.Entries))
+	for i, e := range dl.Entries {
+		out.Entries[i] = ui.TargetDirEntry{Name: e.Name, Dir: e.Dir}
+	}
+	return out
+}
 
 // rootInstructionFor appends a generated "Available specialists" list
 // (name plus description, in loadSubAgentConfigs' order) to base — the

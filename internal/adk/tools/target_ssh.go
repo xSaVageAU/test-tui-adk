@@ -169,6 +169,8 @@ func (t *sshTarget) ReadDir(path string) ([]fs.DirEntry, error) {
 
 func (t *sshTarget) Open(path string) (io.ReadCloser, error) { return t.sftp.Open(path) }
 
+func (t *sshTarget) Getwd() (string, error) { return t.sftp.Getwd() }
+
 func (t *sshTarget) Walk(root string, fn WalkFunc) error {
 	w := t.sftp.Walk(root)
 	for w.Step() {

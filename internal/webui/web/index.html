@@ -8,18 +8,39 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=8">
+  <link rel="stylesheet" href="style.css?v=12">
   <!-- app.js runs first so its alpine:init listener is registered before Alpine starts -->
-  <script defer src="app.js?v=8"></script>
+  <script defer src="app.js?v=12"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"></script>
 </head>
 <body x-data>
+
+  <!-- ── File-tree sidebar (hidden by default; ☰ button toggles) ── -->
+  <div id="filetree" x-show="$store.app.filetreeOpen" x-cloak>
+    <div id="filetree-hdr" :title="$store.app.fileTreeRoot" x-text="$store.app.fileTreeRoot || 'files'"></div>
+    <div id="filetree-list">
+      <template x-for="row in $store.app.fileTreeRows" :key="row.path">
+        <div class="ft-row"
+             :class="{ 'ft-dir': row.dir, 'ft-note-row': row.note }"
+             :style="'padding-left:' + (row.depth * 14 + 8) + 'px'"
+             @click="row.dir && ftToggle(row.path)">
+          <span class="ft-icon" x-text="row.note ? '' : (row.dir ? (row.expanded ? '▾' : '▸') : '·')"></span>
+          <span class="ft-name" x-text="row.name" :title="row.path"></span>
+        </div>
+      </template>
+      <div class="ft-note" x-show="!$store.app.fileTreeRows.length">no files</div>
+    </div>
+  </div>
 
   <!-- ── Terminal column ─────────────────────────────────────── -->
   <div id="terminal">
 
     <!-- Top bar: sess_XXXXXXXX (left)  tokens/window █████░░░░░ (right) -->
     <div id="top-bar">
+      <button id="filetree-btn"
+              :class="{ active: $store.app.filetreeOpen }"
+              title="Toggle file tree"
+              @click="toggleFiletree()">☰</button>
       <span id="session-tag" x-text="$store.app.sessionTag">sess_…</span>
       <!-- Transient status notice: absolutely centered so it can never
            push its neighbors; hidden by checkNoticeFit when there's no

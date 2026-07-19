@@ -335,6 +335,29 @@ type AppConfig struct {
 	// the now-active target or an error establishing it — backs the
 	// /settings "Tool execution target" row. nil disables that row.
 	ConfigureTarget func() (string, error)
+	// ListTargetDir lists one directory of the active execution target's
+	// working tree (dir is slash-separated and relative to the target's
+	// cwd; "" lists the cwd itself) — backs the webui's lazy-loading
+	// file-tree sidebar (/api/files); the TUI doesn't consume it today.
+	// nil disables, same convention as ConfigureTarget.
+	ListTargetDir func(dir string) TargetDirListing
+}
+
+// TargetDirListing/TargetDirEntry are ListTargetDir's contract shape —
+// defined here, on the consumer side, like the Backend types in
+// backend.go. Root is the target's cwd, returned on every listing so a
+// cwd/target change is detectable regardless of which directory was
+// being refreshed.
+type TargetDirListing struct {
+	Root      string
+	Path      string
+	Entries   []TargetDirEntry
+	Truncated bool
+}
+
+type TargetDirEntry struct {
+	Name string
+	Dir  bool
 }
 
 // normalizeTargetType maps a settings target type to the two the UI

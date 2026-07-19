@@ -64,6 +64,7 @@ func StartServer(ctx context.Context, cfg ui.AppConfig, port int) error {
 	mux.HandleFunc("/api/interrupt", s.handleInterrupt)
 	mux.HandleFunc("/api/themes", s.handleThemes)
 	mux.HandleFunc("/api/settings", s.handleSettings)
+	mux.HandleFunc("/api/files", s.handleFiles)
 
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 	listener, err := net.Listen("tcp", addr)
@@ -120,6 +121,26 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+// handleFiles serves the file-tree sidebar: one directory's listing per
+// call, VS Code-style lazy loading (?dir= is slash-separated relative to
+// the target's cwd; empty lists the cwd itself — see tools.ListDir via
+// the AppConfig closure). Deliberately not under s.mu — an SFTP ReadDir
+// can be slow and the closure touches nothing the mutex guards; the
+// sidebar polls this while open, so it must never stall streaming or
+// status calls.
+func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.cfg.ListTargetDir == nil {
+		http.Error(w, "File tree not supported", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(s.cfg.ListTargetDir(r.URL.Query().Get("dir")))
 }
 
 func (s *Server) handleKey(w http.ResponseWriter, r *http.Request) {

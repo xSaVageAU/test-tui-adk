@@ -160,6 +160,7 @@ func main() {
 		SetAgentTools:    adk.SetAgentTools,
 		ListTools:        listTools,
 		ConfigureTarget:  adk.ConfigureExecutionTarget,
+		ListTargetDir:    adk.ListTargetDir,
 	}
 
 	if runWeb {

@@ -38,10 +38,68 @@ html, body {
   overflow: hidden;
 }
 
+/* body is a flex row so the file-tree sidebar sits beside the terminal
+   column instead of overlaying it. */
+body { display: flex; }
+
+/* ── File-tree sidebar ─────────────────────────────────────────── */
+#filetree {
+  flex-shrink: 0;
+  width: 260px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  font-size: 13px;
+}
+#filetree-hdr {
+  flex-shrink: 0;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;       /* ellipsize the left side — the tail of a cwd path is the informative part */
+  text-align: left;
+}
+#filetree-list {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 0;
+}
+#filetree-list::-webkit-scrollbar       { width: 4px; }
+#filetree-list::-webkit-scrollbar-thumb { background: var(--border); }
+.ft-row {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding-top: 1px;
+  padding-bottom: 1px;
+  padding-right: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
+}
+.ft-row.ft-dir { color: var(--text); cursor: pointer; }
+.ft-row.ft-dir:hover { background: var(--highlight); }
+.ft-icon { color: var(--text-faint); flex-shrink: 0; font-size: 11px; }
+.ft-row.ft-dir .ft-icon { color: var(--accent); }
+.ft-name { overflow: hidden; text-overflow: ellipsis; }
+.ft-note { padding: 4px 10px; color: var(--text-faint); font-size: 12px; font-style: italic; }
+.ft-row.ft-note-row { color: var(--text-faint); font-style: italic; font-size: 12px; }
+
 /* ── Terminal column ───────────────────────────────────────────── */
 #terminal {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
   height: 100vh;
   overflow: hidden;
 }
@@ -52,12 +110,27 @@ html, body {
   position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   background: var(--bg);
   padding: 3px 8px;
   font-size: 13px;
 }
+#filetree-btn {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-family: var(--font);
+  font-size: 12px;
+  line-height: 1.2;
+  padding: 0 5px;
+  cursor: pointer;
+  outline: none;
+}
+#filetree-btn:hover  { color: var(--text); border-color: var(--text-muted); }
+#filetree-btn.active { background: var(--accent); color: var(--text-on-fill); border-color: var(--accent); }
 #session-tag { color: var(--accent); font-weight: 700; }
+#context-bar { margin-left: auto; } /* pins right now that the bar has a left cluster */
 /* Transient status notice — same badge treatment as the TUI's
    MessageEvent (highlight fill, accent text, bold). position:absolute
    takes it out of flow so it can never push the session tag or context

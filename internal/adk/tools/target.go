@@ -51,6 +51,12 @@ type Target interface {
 	Open(path string) (io.ReadCloser, error)
 	Walk(root string, fn WalkFunc) error
 
+	// Getwd is the directory relative paths resolve against on this
+	// target — the process cwd locally, the SFTP session's working
+	// directory (the login home) remotely. What the file-tree sidebar
+	// roots at (see filetree.go).
+	Getwd() (string, error)
+
 	// Close releases any resources the target holds (an SSH/SFTP
 	// connection). The local target's Close is a no-op.
 	Close() error
