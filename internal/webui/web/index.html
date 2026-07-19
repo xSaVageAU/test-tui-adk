@@ -120,9 +120,8 @@
     </div>
 
     <!-- Working / thinking row -->
-    <div id="working-row" x-show="$store.app.isStreaming" x-cloak>
-      <span x-text="$store.app.spinner"></span>
-      <span x-text="$store.app.workingLabel"></span>
+    <div id="working-row" x-show="$store.app.isStreaming || $store.app.modal?.kind === 'loader'" x-cloak>
+      <pre x-html="$store.app.spinner"></pre>
     </div>
 
     <!-- Chat input -->
