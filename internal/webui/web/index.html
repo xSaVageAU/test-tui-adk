@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Console</title>
+  <meta name="description" content="Agent chat console — powered by ADK">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=3">
+  <!-- app.js runs first so its alpine:init listener is registered before Alpine starts -->
+  <script defer src="app.js?v=3"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"></script>
+</head>
+<body x-data>
+
+  <!-- ── Terminal column ─────────────────────────────────────── -->
+  <div id="terminal">
+
+    <!-- Top bar: sess_XXXXXXXX (left)  tokens/window █████░░░░░ (right) -->
+    <div id="top-bar">
+      <span id="session-tag" x-text="$store.app.sessionTag">sess_…</span>
+      <span id="context-bar" x-text="$store.app.contextBar"></span>
+    </div>
+    <div id="top-rule"></div>
+
+    <!-- Scrollable chat viewport -->
+    <div id="chat-area">
+      <!-- Block-letter AGENT boot art (filled by JS) -->
+      <div id="boot-art"></div>
+
+      <!-- Message list (rendered reactively by Alpine) -->
+      <div id="messages">
+        <template x-for="msg in $store.app.messages" :key="msg.id">
+          <div class="msg" :data-msgid="msg.id">
+
+            <!-- system badge -->
+            <template x-if="msg.type === 'system'">
+              <div class="system-badge" x-text="msg.text"></div>
+            </template>
+
+            <!-- user message -->
+            <template x-if="msg.type === 'user'">
+              <div>
+                <div class="msg-label role-user">you</div>
+                <div class="msg-body" :class="{ highlighted: $store.app.highlightUser }" x-text="msg.text"></div>
+              </div>
+            </template>
+
+            <!-- agent message -->
+            <template x-if="msg.type === 'agent'">
+              <div>
+                <div class="msg-label role-agent">
+                  agent
+                  <span class="reasoning-badge"
+                        x-show="msg.reasoning"
+                        x-text="msg.reasoningDone
+                          ? (' thought for ' + fmtMs(msg.reasoningMs) + ' ')
+                          : ' thinking… '">
+                  </span>
+                </div>
+                <!-- reasoning block — collapsed once done, click to expand -->
+                <div class="reasoning-block"
+                     x-show="msg.reasoning && $store.app.showReasoning"
+                     :class="{ collapsed: msg.collapsed && msg.reasoningDone }"
+                     x-text="msg.reasoning"
+                     @click="msg.collapsed = !msg.collapsed">
+                </div>
+                <div class="msg-body" x-html="renderMd(msg.text)"></div>
+              </div>
+            </template>
+
+            <!-- tool call row -->
+            <template x-if="msg.type === 'tool'">
+              <div class="tool-msg">
+                <!-- header line: gutter + badge + args -->
+                <div class="tool-hdr">
+                  <span class="tool-gutter">▏ </span>
+                  <span class="tool-name" x-text="msg.name"></span>
+                  <span class="tool-args" x-text="summarizeArgs(msg.name, msg.args)"></span>
+                </div>
+                <!-- status / result lines (only one visible at a time) -->
+                <div class="tool-detail" x-show="msg.status === 'running'">
+                  <span class="tool-running">running…</span>
+                </div>
+                <div class="tool-detail tool-confirm" x-show="msg.status === 'pending'">
+                  <span class="tool-confirm-hint" x-text="'⚠ ' + msg.hint"></span>
+                  <button class="confirm-btn yes" @click.stop="doConfirm(msg.confirmId, msg.id, true)">approve</button>
+                  <button class="confirm-btn no"  @click.stop="doConfirm(msg.confirmId, msg.id, false)">deny</button>
+                </div>
+                <div class="tool-detail" x-show="msg.status === 'done' && msg.result !== null">
+                  <span class="tool-result" x-text="summarizeResult(msg.name, msg.result)"></span>
+                </div>
+                <div class="tool-detail" x-show="msg.status === 'approved'">
+                  <span class="tool-approved">✓ approved</span>
+                </div>
+                <div class="tool-detail" x-show="msg.status === 'denied'">
+                  <span class="tool-denied">✗ denied</span>
+                </div>
+              </div>
+            </template>
+
+          </div><!-- .msg -->
+        </template>
+      </div><!-- #messages -->
+    </div><!-- #chat-area -->
+
+    <!-- Command palette — rises above input while typing / -->
+    <div id="cmd-palette" x-show="$store.app.paletteVisible" x-cloak>
+      <template x-for="(cmd, i) in $store.app.paletteMatches" :key="cmd.name">
+        <div class="cmd-item"
+             :class="{ selected: i === $store.app.paletteIdx }"
+             @click="selectPaletteItem(i)"
+             @mousemove="$store.app.paletteIdx = i">
+          <span class="cmd-name" x-text="cmd.name"></span>
+          <span class="cmd-desc" x-text="cmd.desc"></span>
+        </div>
+      </template>
+    </div>
+
+    <!-- Working / thinking row -->
+    <div id="working-row" x-show="$store.app.isStreaming" x-cloak>
+      <span x-text="$store.app.spinner"></span>
+      <span x-text="$store.app.workingLabel"></span>
+    </div>
+
+    <!-- Chat input -->
+    <div id="input-wrap">
+      <input id="chat-input" type="text"
+             placeholder="Type a message… (/ for commands)"
+             autocomplete="off" spellcheck="false">
+    </div>
+
+    <!-- Footer keybinding badges -->
+    <div id="footer">
+      <span class="kb"><span class="kb-key">enter</span> send</span>
+      <span class="kb"><span class="kb-key">/</span> commands</span>
+      <span class="kb"><span class="kb-key">pgup/pgdn</span> prev/next prompt</span>
+      <span class="kb kb-toggle" :class="{ active: $store.app.autoAccept }">
+        <span class="kb-key">shift+tab</span> auto-accept
+      </span>
+      <span class="kb kb-toggle" :class="{ active: $store.app.verboseTools }">
+        <span class="kb-key">f2</span> verbose tools
+      </span>
+      <span class="kb"><span class="kb-key">ctrl+c</span> quit</span>
+    </div>
+
+  </div><!-- #terminal -->
+
+  <!-- ── Modal overlay ──────────────────────────────────────── -->
+  <div id="modal-overlay"
+       x-show="$store.app.modalVisible"
+       x-cloak
+       @click.self="modalClose()">
+    <div id="modal-box">
+
+      <div id="modal-title" x-text="$store.app.modal?.title || ''"></div>
+
+      <div id="modal-body">
+
+        <!-- List modal (theme / sessions / settings / agents) -->
+        <template x-if="$store.app.modal && !['key','agent-detail'].includes($store.app.modal.kind)">
+          <div>
+            <template x-for="(item, i) in ($store.app.modal.items || [])" :key="i">
+              <div class="modal-row"
+                   :class="{ selected: i === $store.app.modal.idx }"
+                   @click="modalConfirm(i)"
+                   @mousemove="modalHover(i)">
+                <span class="modal-row-name" x-text="item.name"></span>
+                <span class="modal-row-tag"  x-text="item.tag  || ''"></span>
+              </div>
+            </template>
+          </div>
+        </template>
+
+        <!-- /key modal -->
+        <template x-if="$store.app.modal?.kind === 'key'">
+          <div class="modal-fields">
+            <label class="modal-field-label">Provider</label>
+            <select id="mf-provider" class="modal-field">
+              <option value="gemini">Gemini</option>
+              <option value="openrouter">OpenRouter</option>
+            </select>
+            <label class="modal-field-label">API Key</label>
+            <input id="mf-key" type="password" class="modal-field"
+                   placeholder="Enter API key…"
+                   x-init="$nextTick(() => $el.focus())"
+                   @keydown.enter.prevent="submitKey()"
+                   @keydown.escape.prevent="modalClose()">
+            <p class="modal-hint">Enter to save · Escape to cancel</p>
+          </div>
+        </template>
+
+        <!-- /agents detail modal -->
+        <template x-if="$store.app.modal?.kind === 'agent-detail'">
+          <div class="modal-fields">
+            <label class="modal-field-label">Provider</label>
+            <select id="mf-aprov" class="modal-field">
+              <option value="gemini"
+                      :selected="($store.app.modal.data?.agent?.Provider || 'gemini') === 'gemini'">Gemini</option>
+              <option value="openrouter"
+                      :selected="($store.app.modal.data?.agent?.Provider || '') === 'openrouter'">OpenRouter</option>
+            </select>
+            <label class="modal-field-label">Model</label>
+            <input id="mf-amodel" type="text" class="modal-field"
+                   :value="$store.app.modal.data?.agent?.Model || ''"
+                   placeholder="e.g. gemini-2.0-flash"
+                   x-init="$nextTick(() => $el.focus())"
+                   @keydown.enter.prevent="submitAgentDetail()"
+                   @keydown.escape.prevent="modalClose()">
+            <template x-if="($store.app.modal.data?.tools || []).length > 0">
+              <div>
+                <label class="modal-field-label" style="margin-top:8px">Tools</label>
+                <div class="tool-check-list">
+                  <template x-for="t in ($store.app.modal.data.tools || [])" :key="t.Name">
+                    <label class="tool-check-item">
+                      <input type="checkbox" :value="t.Name"
+                             :checked="($store.app.modal.data?.agent?.Tools || []).includes(t.Name)">
+                      <span x-text="t.Name"></span>
+                      <span class="tool-check-desc" x-text="t.Description || ''"></span>
+                    </label>
+                  </template>
+                </div>
+              </div>
+            </template>
+            <p class="modal-hint">Enter to save · Escape to cancel</p>
+          </div>
+        </template>
+
+      </div><!-- #modal-body -->
+    </div><!-- #modal-box -->
+  </div><!-- #modal-overlay -->
+
+</body>
+</html>

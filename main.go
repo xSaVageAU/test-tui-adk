@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 
 	"tui-testing/internal/adk"
 	"tui-testing/internal/ui"
+	"tui-testing/internal/webui"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -87,6 +89,12 @@ func joinNotes(existing, add string) string {
 func main() {
 	ctx := context.Background()
 
+	var runWeb bool
+	var port int
+	flag.BoolVar(&runWeb, "web", false, "Start the WebUI server instead of the terminal UI")
+	flag.IntVar(&port, "port", 8080, "Port to run the WebUI server on")
+	flag.Parse()
+
 	var backend ui.Backend
 	var note string
 	var specialists []string
@@ -139,7 +147,7 @@ func main() {
 		note = joinNotes(note, "Tools are running on "+desc)
 	}
 
-	app := ui.NewApp(ui.AppConfig{
+	appConfig := ui.AppConfig{
 		Backend:          backend,
 		BackendNote:      note,
 		NewBackend:       newBackend,
@@ -152,7 +160,20 @@ func main() {
 		SetAgentTools:    adk.SetAgentTools,
 		ListTools:        listTools,
 		ConfigureTarget:  adk.ConfigureExecutionTarget,
-	})
+	}
+
+	if runWeb {
+		runErr := webui.StartServer(ctx, appConfig, port)
+		adk.ShutdownBackgroundProcesses()
+		adk.CloseExecutionTarget()
+		if runErr != nil {
+			fmt.Fprintln(os.Stderr, "error:", runErr)
+			os.Exit(1)
+		}
+		return
+	}
+
+	app := ui.NewApp(appConfig)
 
 	// AltScreen and MouseMode are set on the tea.View returned from
 	// App.View() now (v2 moved these from Program options to per-View
