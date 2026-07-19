@@ -19,7 +19,11 @@
   --warning:      #d7af00;
   --error:        #d70000;
   --attention:    #d7875f;
-  --font: 'JetBrains Mono', 'Courier New', monospace;
+  /* Cascadia Mono / Consolas sit before Courier New because the Google
+     Fonts JetBrains Mono subset only covers latin — every animation glyph
+     (block elements ▁-█, shades ░▒▓, braille, katakana) falls through to
+     the next font that has it, and Courier New has almost none of them. */
+  --font: 'JetBrains Mono', 'Cascadia Mono', 'Cascadia Code', 'Consolas', 'Courier New', monospace;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -78,6 +82,12 @@ html, body {
   color: var(--accent);
   white-space: pre;
   user-select: none;
+  /* Cascadia/Consolas first, NOT the shared --font stack: the webfont
+     JetBrains Mono subset has the spaces but not █, so with --font the two
+     glyphs come from different fonts whose advances differ by a fraction
+     of a pixel — rows with different block/space mixes drift horizontally.
+     One font for everything keeps the columns exactly aligned. */
+  font-family: 'Cascadia Mono', 'Cascadia Code', 'Consolas', var(--font);
 }
 
 /* ── Messages ──────────────────────────────────────────────────── */
@@ -226,20 +236,39 @@ html, body {
 .cmd-item.selected .cmd-desc { color: var(--text-on-fill); }
 
 /* ── Working row ───────────────────────────────────────────────── */
+/* Always exactly 2 animation rows (TUI workingAnimHeight) — min-height on
+   the pre (2 × line-height) keeps the space reserved while idle/blank, and
+   JS top-pads 1-line variants so they anchor against the input box. */
 #working-row {
   flex-shrink: 0;
   background: var(--bg);
   padding: 4px 10px;
   overflow: hidden;
-  height: 40px;
 }
 #working-row pre {
   font-family: var(--font);
   font-size: 13px;
   line-height: 1.25;
+  min-height: 2.5em;
   white-space: pre;
   color: var(--text-muted);
 }
+/* Terminal-cell grid: every animation cell is one span, locked to exactly
+   1ch × 1 line. Without this, any glyph served by a fallback font (see the
+   --font comment) has a different advance width, and lines visibly wobble
+   left/right as the animation swaps glyphs frame to frame. */
+#working-row pre span {
+  display: inline-block;
+  width: 1ch;
+  height: 1.25em;
+  line-height: 1.25em;
+  text-align: center;
+  overflow: hidden;
+  vertical-align: bottom;
+}
+/* Multi-character label spans (e.g. Bouncing Dots' caption) opt out of the
+   1ch cell lock. */
+#working-row pre span.anim-label { width: auto; }
 
 
 /* ── Input bar ─────────────────────────────────────────────────── */

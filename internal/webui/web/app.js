@@ -62,8 +62,8 @@ document.addEventListener('alpine:init', () => {
 
     // ── Streaming UI ─────────────────────────────────────────
     isStreaming:  false,
-    spinner:      '⣾',
-    workingLabel: 'thinking…',
+    spinner:      '',
+    workingLabel: 'thinking',
 
     // ── Settings toggles ─────────────────────────────────────
     verboseTools:  false,
@@ -236,6 +236,9 @@ document.addEventListener('alpine:init', () => {
       }
       this.modalVisible = false;
       this.modal        = null;
+      // /loader's live preview drives the spin timer on its own; once the
+      // picker closes, only an in-flight turn justifies keeping it running.
+      if (!this.isStreaming) stopSpinning();
       document.getElementById('chat-input')?.focus();
     },
 
@@ -293,6 +296,23 @@ function lerpColor(hexA, hexB, amount) {
   return '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
 }
 
+// scaleColor darkens a hex color by multiplying each channel by f —
+// mirrors the TUI Orbit trail's fade-toward-black (workinganim_variants.go),
+// which is *not* the same as lerping toward the theme background.
+function scaleColor(hex, f) {
+  const c = (hex || '#000000').replace('#', '');
+  const ch = i => Math.round(parseInt(c.slice(i, i + 2), 16) * f)
+    .toString(16).padStart(2, '0');
+  return '#' + ch(0) + ch(2) + ch(4);
+}
+
+// escapeHtml — animation output is injected via x-html, so any rune that
+// is HTML-significant (Matrix Rain's <>[]{} tail) must be escaped or it
+// silently corrupts the markup.
+function escapeHtml(ch) {
+  return ch === '&' ? '&amp;' : ch === '<' ? '&lt;' : ch === '>' ? '&gt;' : ch;
+}
+
 function getThemeColors() {
   if (!A()) return {};
   const current = A().currentTheme;
@@ -312,12 +332,29 @@ function getThemeColors() {
   };
 }
 
+// Measured character width (canvas measureText on the pre's actual font)
+// instead of the old hardcoded /8 guess — the guess drifted with zoom and
+// font fallback, leaving the animations either clipped or short of the
+// full row width the TUI always fills.
+let _charWidth = { font: '', w: 0 };
+function animCharWidth(pre) {
+  const cs = getComputedStyle(pre);
+  const font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+  if (_charWidth.font !== font) {
+    const canvas = animCharWidth._c || (animCharWidth._c = document.createElement('canvas'));
+    const ctx = canvas.getContext('2d');
+    ctx.font = font;
+    _charWidth = { font, w: ctx.measureText('0'.repeat(100)).width / 100 };
+  }
+  return _charWidth.w;
+}
+
 function getAnimWidth() {
-  const el = document.getElementById('working-row');
-  if (!el) return 80;
-  // JetBrains Mono at 13px has character width ~7.8px
-  const w = Math.floor(el.clientWidth / 8.0) - 2;
-  return Math.max(40, Math.min(w, 150));
+  const pre = document.querySelector('#working-row pre');
+  if (!pre) return 80;
+  const cw = animCharWidth(pre);
+  if (!cw) return 80;
+  return Math.max(20, Math.floor(pre.clientWidth / cw));
 }
 
 const GLITCH_RUNES = "▓█░▒╔╗╚╝║═╠╣╦╩╬⌂◙◘☺☻♦♣♠♥";
@@ -327,7 +364,9 @@ const STATUS_MESSAGES = [
   "Generating a thoughtful and nuanced response…  ",
   "Consulting knowledge and crafting an answer…   "
 ];
-const RAIN_RUNES = "ｦｧｨｩｪｫｬｭｮｯｰｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ1234567890:.+-*=";
+// Same rune set as the TUI's randomRainRune — the <>[]{} tail is safe here
+// because every rain rune goes through escapeHtml before injection.
+const RAIN_RUNES = "ｦｧｨｩｪｫｬｭｮｯｰｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ0123456789<>[]{}+-*";
 const BRAILLE_RUNES = "⠁⠂⠄⡀⢀⠠⠐⠈⠃⠅⠘⠨⠰⣀⡄⢠⠸⡇⢸⣆⣇⣷⣾⣿";
 
 function renderAnim(name, t, width, frame, label) {
@@ -381,7 +420,7 @@ function renderAnim(name, t, width, frame, label) {
           const fade = 1.0 - ti / trailLen;
           let col = lerpColor(dot.colB, dot.colA, fade);
           if (ti > 0) {
-            col = lerpColor(t.background, col, fade);
+            col = scaleColor(col, fade); // TUI fades the trail toward black
           }
           cells[x].ch = ti === 0 ? '●' : '·';
           cells[x].col = col;
@@ -499,9 +538,10 @@ function renderAnim(name, t, width, frame, label) {
       for (const c of cells) {
         html1 += `<span style="color:${c.col}">${c.ch}</span>`;
       }
-      let html2 = `<span style="color:${t.textMuted}">aligning thoughts</span>`;
-      const padding = " ".repeat(Math.max(0, Math.floor(width / 2 - 9)));
-      return html1 + "\n" + padding + html2;
+      // TUI renders this label at the line start, not centered. anim-label
+      // exempts this multi-char span from the CSS 1ch cell lock.
+      const html2 = `<span class="anim-label" style="color:${t.textMuted}"> aligning thoughts </span>`;
+      return html1 + "\n" + html2;
     }
 
     case "Matrix Rain": {
@@ -527,7 +567,7 @@ function renderAnim(name, t, width, frame, label) {
             }
           }
           const fw = bold ? "font-weight:bold" : "";
-          const s = `<span style="color:${col};${fw}">${ch}</span>`;
+          const s = `<span style="color:${col};${fw}">${escapeHtml(ch)}</span>`;
           if (r === 0) line1.push(s);
           else line2.push(s);
         }
@@ -596,23 +636,56 @@ function renderAnim(name, t, width, frame, label) {
 }
 
 let spinTimer = null;
+// Persistent across start/stop like the TUI's App-lifetime frame counter —
+// restarting mid-turn (HITL resume) must not visibly snap every animation
+// back to its frame-0 pose.
+let animFrame = 0;
+
+// The TUI reserves exactly 2 rows and pads short (1-line) variants with a
+// blank line on *top*, so single-line animations anchor to the bottom,
+// right against the input box (workinganim.go render()). Mirror that here.
+const ANIM_HEIGHT = 2;
+function padAnimLines(out) {
+  const lines = out.split("\n");
+  while (lines.length < ANIM_HEIGHT) lines.unshift("");
+  return lines.slice(-ANIM_HEIGHT).join("\n");
+}
+
+function renderSpinnerFrame() {
+  const name = A().settings?.UI?.WorkingAnim || "Equalizer";
+  const t = getThemeColors();
+  const w = getAnimWidth();
+  A().spinner = padAnimLines(renderAnim(name, t, w, animFrame, A().workingLabel));
+}
 
 function startSpinning() {
   stopSpinning();
-  let frame = 0;
-  const tickRate = 80; // 12.5 FPS
-  const updateSpinner = () => {
-    const name = A().settings?.UI?.WorkingAnim || "Equalizer";
-    const t = getThemeColors();
-    const w = getAnimWidth();
-    A().spinner = renderAnim(name, t, w, frame++, A().workingLabel);
-    spinTimer = setTimeout(updateSpinner, tickRate);
+  // rAF with a fixed 60ms accumulator instead of setTimeout(60): timer
+  // callbacks drift/stutter in browsers, which made the smooth waves
+  // (Pulse Wave etc.) visibly hitch. This paces frames evenly against
+  // the display clock at the TUI's tea.Tick(60ms) rate.
+  const tickRate = 60;
+  let last = performance.now();
+  let acc = tickRate; // render immediately on the first rAF
+  const step = now => {
+    spinTimer = requestAnimationFrame(step);
+    acc += now - last;
+    last = now;
+    if (acc < tickRate) return;
+    // Advance whole ticks, but never spiral to catch up after a
+    // background-tab stall.
+    animFrame += Math.min(4, Math.floor(acc / tickRate));
+    acc %= tickRate;
+    renderSpinnerFrame();
   };
-  updateSpinner();
+  spinTimer = requestAnimationFrame(step);
 }
 
 function stopSpinning() {
-  if (spinTimer) { clearTimeout(spinTimer); spinTimer = null; }
+  if (spinTimer) { cancelAnimationFrame(spinTimer); spinTimer = null; }
+  // Blank the reserved rows (TUI blankWorkingAnim) rather than freezing
+  // on the last frame.
+  if (window.Alpine && A()) A().spinner = '';
 }
 
 function setStreaming(on, label) {
@@ -726,7 +799,7 @@ function sendMessage(text) {
   document.getElementById('chat-input').value = '';
   A().closePalette();
   A().pushUserMsg(text);
-  setStreaming(true, 'thinking…');
+  setStreaming(true, 'thinking');
 
   const url = `/api/stream?message=${encodeURIComponent(text)}&sessionId=${encodeURIComponent(A().sessionId)}`;
   evtSrc = new EventSource(url);
@@ -746,21 +819,25 @@ function handleChunk(c, rs) {
   if (c.Text) {
     if (rs.get()) { A().appendReasoning('', Date.now() - rs.get()); rs.set(null); }
     A().appendText(c.Text);
-    setWorkingLabel('thinking…');
+    setWorkingLabel('thinking');
   }
   if (c.ToolCall) {
     if (rs.get()) { A().appendReasoning('', Date.now() - rs.get()); rs.set(null); }
     A().pushToolCall(c.ToolCall.ID, c.ToolCall.Name, c.ToolCall.Args);
-    setWorkingLabel(c.ToolCall.Name + '…');
+    setWorkingLabel('using ' + c.ToolCall.Name);
   }
   if (c.ToolResult) {
     A().updateToolResult(c.ToolResult.ID, c.ToolResult.Result);
-    setWorkingLabel('thinking…');
+    setWorkingLabel('thinking');
   }
   if (c.Confirmation) {
     if (rs.get()) { A().appendReasoning('', Date.now() - rs.get()); rs.set(null); }
     const conf = c.Confirmation;
     A().pendingToolConfirm(conf.OriginalID, conf.ID, conf.Hint);
+    // TUI parity: the anim stops (blank reserved rows) while a HITL
+    // confirmation waits on the user — isStreaming stays true so the
+    // input stays gated, matching turnInProgress.
+    stopSpinning();
     finishStream(true); // pause — HITL needs user action
   }
   if (c.FinishReason && c.FinishReason !== '') A().closeAgentBubble();
@@ -791,7 +868,7 @@ async function interrupt() {
 // ══════════════════════════════════════════════════════════════════
 async function doConfirmImpl(confirmId, origId, approved) {
   A().resolveToolConfirm(origId, approved);
-  setStreaming(true, approved ? 'continuing…' : 'processing…');
+  setStreaming(true, 'thinking'); // matches hitl.go's resolveConfirmation
   try {
     const res = await fetch('/api/confirm', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -921,13 +998,21 @@ function cmdLoader() {
     idx:   Math.max(0, LOADER_NAMES.indexOf(origin)),
     data:  { origin },
   });
+  // Live preview while the picker is open, whether or not a turn is
+  // running — same as the TUI's workingAnimShouldRun (paletteLoader).
+  startSpinning();
 }
 
+// announce doubles as "commit": previews (arrow-key moves, escape-revert)
+// only touch the in-memory setting the spin loop reads; the TUI likewise
+// persists workingAnim only when a choice is confirmed.
 function setLoader(name, announce) {
   if (!A().settings) return;
   A().settings.UI.WorkingAnim = name;
-  saveSettings();
-  if (announce) A().sysMsg('Working animation set to ' + name + '.');
+  if (announce) {
+    saveSettings();
+    A().sysMsg('Working animation set to ' + name + '.');
+  }
 }
 
 function openAgentSettings() {
@@ -1312,7 +1397,8 @@ window.modalConfirm = i     => modalConfirmAtIdx(i);
 window.modalHover   = i     => {
   if (!A().modal || A().modal.idx === i) return;
   A().modal.idx = i;
-  if (A().modal.kind === 'theme') applyTheme(A().modal.items[i].id, false);
+  if (A().modal.kind === 'theme')  applyTheme(A().modal.items[i].id, false);
+  if (A().modal.kind === 'loader') setLoader(A().modal.items[i].id, false);
 };
 
 // Palette

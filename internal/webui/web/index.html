@@ -8,9 +8,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=3">
+  <link rel="stylesheet" href="style.css?v=6">
   <!-- app.js runs first so its alpine:init listener is registered before Alpine starts -->
-  <script defer src="app.js?v=3"></script>
+  <script defer src="app.js?v=6"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"></script>
 </head>
 <body x-data>
@@ -119,8 +119,10 @@
       </template>
     </div>
 
-    <!-- Working / thinking row -->
-    <div id="working-row" x-show="$store.app.isStreaming || $store.app.modal?.kind === 'loader'" x-cloak>
+    <!-- Working / thinking row — always present so the layout never jumps
+         when a turn starts/ends (TUI parity: workingAnimHeight rows are
+         reserved even while idle; content is simply blank then). -->
+    <div id="working-row">
       <pre x-html="$store.app.spinner"></pre>
     </div>
 
