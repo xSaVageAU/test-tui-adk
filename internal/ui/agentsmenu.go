@@ -237,7 +237,7 @@ func (a *App) saveAgentProvider(provider string) tea.Cmd {
 		return nil
 	}
 	a.refreshAgentSummary(a.agentMenuTarget, func(ag *AgentConfigSummary) { ag.Provider = provider })
-	a.systemMessage("Provider set to " + providerDisplayName(provider) + ". Reloading agents...")
+	a.setNotice("Provider set to " + providerDisplayName(provider) + ". Reloading agents...")
 	return a.reloadBackend()
 }
 
@@ -256,7 +256,7 @@ func (a *App) submitAgentModel() tea.Cmd {
 		return a.backOrClose(a.closeMenuCmd)
 	}
 	a.refreshAgentSummary(target, func(ag *AgentConfigSummary) { ag.Model = modelName })
-	a.systemMessage("Model updated. Reloading agents...")
+	a.setNotice("Model updated. Reloading agents...")
 	return tea.Batch(a.backOrClose(a.closeMenuCmd), a.reloadBackend())
 }
 
@@ -272,7 +272,7 @@ func (a *App) reloadBackend() tea.Cmd {
 		return nil
 	}
 	if a.turnInProgress() {
-		a.systemMessage("Saved — reload (restart, or edit again) once the current response finishes for it to take effect.")
+		a.setNotice("Saved — reload (restart, or edit again) once the current response finishes for it to take effect.")
 		return nil
 	}
 	// Whatever's on disk right now (including any tool toggles — see

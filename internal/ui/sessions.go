@@ -65,7 +65,7 @@ func (a *App) startNewSession() {
 	}
 	a.sessionID = newSessionID()
 	a.resetTranscriptState()
-	a.systemMessage("Started a new session.")
+	a.setNotice("Started a new session.")
 }
 
 // switchSession changes which session subsequent messages go to, and
@@ -78,7 +78,7 @@ func (a *App) startNewSession() {
 func (a *App) switchSession(id string) tea.Cmd {
 	a.sessionID = id
 	a.resetTranscriptState()
-	a.systemMessage("Switched to " + shortSessionID(id) + " — loading history...")
+	a.setNotice("Switched to " + shortSessionID(id) + " — loading history...")
 
 	backend := a.backend
 	return func() tea.Msg {
@@ -203,7 +203,7 @@ func (a *App) confirmDeleteSession(id string) tea.Cmd {
 	target := a.deleteSessionTarget
 
 	if target != "" {
-		a.systemMessage("Deleting session...")
+		a.setNotice("Deleting session...")
 		return func() tea.Msg {
 			ctx := context.Background()
 			err := backend.DeleteSession(ctx, target)
@@ -218,7 +218,7 @@ func (a *App) confirmDeleteSession(id string) tea.Cmd {
 		}
 	}
 
-	a.systemMessage("Deleting all sessions...")
+	a.setNotice("Deleting all sessions...")
 	return func() tea.Msg {
 		ctx := context.Background()
 		sessions, err := backend.ListSessions(ctx)

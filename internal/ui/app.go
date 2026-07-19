@@ -195,6 +195,15 @@ type App struct {
 	// Update).
 	workingLabel string
 
+	// notice/noticeExpiry/noticeTicking back the top bar's transient
+	// status area (see notice.go and header.go's joinLeftCenterRight):
+	// the current badge text, when it should disappear, and whether an
+	// expiry tick is already in flight (so Update's wrapper schedules
+	// exactly one timer per live notice rather than one per pass).
+	notice        string
+	noticeExpiry  time.Time
+	noticeTicking bool
+
 	// textPopupKind/textPopupLabel/textPopupProvider back paletteTextInput
 	// (see keyinput.go) — one popup shared by /key's masked API-key field
 	// and /agents' unmasked model field, distinguished by kind so Enter
@@ -394,7 +403,33 @@ func (a *App) Init() tea.Cmd {
 	return a.input.Focus()
 }
 
+// Update wraps update (the real message handler, below) with the one
+// piece of bookkeeping every code path shares: the top-bar notice's
+// expiry timer. setNotice can't schedule that itself — it returns no
+// tea.Cmd so plain void helpers can call it (see notice.go) — so the
+// timer is started here whenever a pass ends with a live notice and no
+// tick in flight. A notice replaced mid-flight just extends noticeExpiry;
+// the stale tick then lands early, sees the deadline hasn't passed, and
+// this wrapper reschedules for the remainder.
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	var model tea.Model = a
+	if _, ok := msg.(noticeExpireMsg); ok {
+		a.noticeTicking = false
+		if !time.Now().Before(a.noticeExpiry) {
+			a.notice = ""
+		}
+	} else {
+		model, cmd = a.update(msg)
+	}
+	if a.notice != "" && !a.noticeTicking {
+		a.noticeTicking = true
+		cmd = tea.Batch(cmd, noticeExpireTick(time.Until(a.noticeExpiry)))
+	}
+	return model, cmd
+}
+
+func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		widthChanged := a.ready && msg.Width != a.width
@@ -572,9 +607,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.bootInfo.Specialists = msg.backend.Specialists()
 		a.contextWindow = msg.backend.ContextWindow()
 		if msg.successMsg != "" {
-			a.systemMessage(msg.successMsg)
+			a.setNotice(msg.successMsg)
 		} else {
-			a.systemMessage("Connected.")
+			a.setNotice("Connected.")
 		}
 
 		if a.pendingMessage != "" {
@@ -591,7 +626,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		if len(msg.sessions) == 0 {
-			a.systemMessage("No past sessions yet.")
+			a.setNotice("No past sessions yet.")
 			return a, nil
 		}
 		items := make([]paletteItem, len(msg.sessions))
@@ -611,9 +646,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.replayTranscript(msg.entries)
 		if len(msg.entries) == 0 {
-			a.systemMessage("Switched to " + shortSessionID(a.sessionID) + ".")
+			a.setNotice("Switched to " + shortSessionID(a.sessionID) + ".")
 		} else {
-			a.systemMessage("Switched to " + shortSessionID(a.sessionID) + " — history loaded.")
+			a.setNotice("Switched to " + shortSessionID(a.sessionID) + " — history loaded.")
 		}
 		a.followTranscript()
 		return a, nil
@@ -628,10 +663,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if n != 1 {
 			label = fmt.Sprintf("Deleted %d sessions.", n)
 		}
+		// Partial failure stays a transcript message (the error detail
+		// must outlive a 4-second badge); clean success is just a notice.
 		if msg.err != nil {
-			label += " Some failed: " + msg.err.Error()
+			a.systemMessage(label + " Some failed: " + msg.err.Error())
+		} else {
+			a.setNotice(label)
 		}
-		a.systemMessage(label)
 		for _, id := range msg.deletedIDs {
 			if id == a.sessionID {
 				a.startNewSession()
@@ -672,7 +710,7 @@ func (a *App) View() tea.View {
 	}
 
 	width := a.renderWidth()
-	topBar := renderTopBar(a.styles, width, a.sessionID, a.contextUsed, a.contextWindow)
+	topBar := renderTopBar(a.styles, width, a.sessionID, a.notice, a.contextUsed, a.contextWindow)
 	body := a.viewport.View()
 	if sticky := a.stickyPromptOverlay(); sticky != "" {
 		body = overlay(body, sticky, 0, 0, a.viewport.Width())

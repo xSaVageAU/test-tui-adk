@@ -91,7 +91,7 @@ func (a *App) cancelMenu() tea.Cmd {
 		}
 	}
 	if a.agentToolsChanged {
-		a.systemMessage("Tools updated. Reloading agents...")
+		a.setNotice("Tools updated. Reloading agents...")
 		cmd = a.reloadBackend()
 	}
 	a.closeMenu()

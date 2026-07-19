@@ -36,7 +36,7 @@ func (a *App) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return a, tea.Quit
 		default:
 			a.quitArmedAt = time.Now()
-			a.systemMessage("Press ctrl+c again to exit.")
+			a.setNotice("Press ctrl+c again to exit.")
 			return a, nil
 		}
 

@@ -125,7 +125,7 @@ func (a *App) runCommand(name string) tea.Cmd {
 		// mid-turn" correctly for this manual path, nothing extra needed
 		// here. See turn.go's concludeTurn for the other way this fires
 		// (a reload_agents tool call, deferred until the turn concludes).
-		a.systemMessage("Reloading agents...")
+		a.setNotice("Reloading agents...")
 		return a.reloadBackend()
 	case "exit":
 		// A typed, deliberate command — unlike ctrl+c (see handleKey),
@@ -283,7 +283,7 @@ func (a *App) dropPendingMessage() {
 func (a *App) confirmMenuSelection(id string) (bool, tea.Cmd) {
 	switch a.paletteKind {
 	case paletteTheme:
-		a.systemMessage("Theme set to " + id + ".")
+		a.setNotice("Theme set to " + id + ".")
 	case paletteLoader:
 		// Explicit rather than relying solely on previewWorkingAnim: if
 		// Enter is pressed on the very first row without ever arrowing,
@@ -291,7 +291,7 @@ func (a *App) confirmMenuSelection(id string) (bool, tea.Cmd) {
 		// for it.
 		a.workingAnim.variant = parseWorkingAnimVariant(id)
 		a.persistSettings()
-		a.systemMessage("Working animation set to " + id + ".")
+		a.setNotice("Working animation set to " + id + ".")
 	case paletteSettings:
 		switch id {
 		case "tui":
@@ -388,7 +388,7 @@ func (a *App) cycleExecutionTarget() {
 			a.persistSettings()
 		}
 	} else {
-		a.systemMessage("Tools now running on: " + desc)
+		a.setNotice("Tools now running on: " + desc)
 	}
 	a.refreshTranscript()
 }
@@ -435,13 +435,13 @@ func (a *App) submitNumericSetting() tea.Cmd {
 	switch kind {
 	case textPopupPopupWidth:
 		a.popupWidth = clampInt(n, popupWidthMin, popupWidthMax)
-		a.systemMessage(fmt.Sprintf("Popup width set to %d.", a.popupWidth))
+		a.setNotice(fmt.Sprintf("Popup width set to %d.", a.popupWidth))
 	case textPopupPopupHeight:
 		a.popupHeight = clampInt(n, popupHeightMin, popupHeightMax)
-		a.systemMessage(fmt.Sprintf("Popup height set to %d.", a.popupHeight))
+		a.setNotice(fmt.Sprintf("Popup height set to %d.", a.popupHeight))
 	case textPopupToolPreviewLines:
 		a.toolPreviewMaxLines = clampInt(n, toolPreviewMaxLinesMin, toolPreviewMaxLinesMax)
-		a.systemMessage(fmt.Sprintf("Tool output preview lines set to %d.", a.toolPreviewMaxLines))
+		a.setNotice(fmt.Sprintf("Tool output preview lines set to %d.", a.toolPreviewMaxLines))
 		// Unlike popup width/height, this affects transcript rendering
 		// directly (verbose tool-output blocks), so re-render now rather
 		// than waiting for the next unrelated refresh to pick it up.

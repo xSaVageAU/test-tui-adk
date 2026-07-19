@@ -49,6 +49,7 @@ html, body {
 /* ── Top bar ───────────────────────────────────────────────────── */
 #top-bar {
   flex-shrink: 0;
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -57,6 +58,23 @@ html, body {
   font-size: 13px;
 }
 #session-tag { color: var(--accent); font-weight: 700; }
+/* Transient status notice — same badge treatment as the TUI's
+   MessageEvent (highlight fill, accent text, bold). position:absolute
+   takes it out of flow so it can never push the session tag or context
+   bar; checkNoticeFit hides it outright when it would overlap them. */
+#status-notice {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--highlight);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 12px;
+  padding: 1px 8px;
+  white-space: nowrap;
+  pointer-events: none;
+}
 #context-bar { color: var(--text-faint); font-size: 12px; }
 #top-rule    { flex-shrink: 0; height: 1px; background: var(--border); }
 

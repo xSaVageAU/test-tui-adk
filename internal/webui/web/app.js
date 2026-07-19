@@ -51,6 +51,7 @@ document.addEventListener('alpine:init', () => {
     contextWindow: 0,
     targetDescription: 'local host',
     lastBackendNote: '',
+    notice:        '',   // transient top-bar status badge; see showNotice()
 
     // ── Messages ─────────────────────────────────────────────
     messages:       [],
@@ -265,6 +266,38 @@ document.addEventListener('alpine:init', () => {
 //  Store shortcut
 // ══════════════════════════════════════════════════════════════════
 function A() { return Alpine.store('app'); }
+
+// ══════════════════════════════════════════════════════════════════
+//  Top-bar status notice — mirrors the TUI's notice.go/setNotice split:
+//  confirmations and progress notes show briefly in the center of the
+//  top bar and expire; failures and refusals stay chat sysMsg badges,
+//  since an error that vanishes after 4 seconds would be data loss.
+// ══════════════════════════════════════════════════════════════════
+const NOTICE_DURATION = 4000; // TUI noticeDuration
+
+let noticeTimer = null;
+
+function showNotice(text) {
+  A().notice = text;
+  if (noticeTimer) clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => { A().notice = ''; noticeTimer = null; }, NOTICE_DURATION);
+  Alpine.nextTick(checkNoticeFit);
+}
+
+// Hidden — never pushed aside, never truncated — when the centered badge
+// would collide with the session tag or context bar (TUI parity:
+// header.go's joinLeftCenterRight drops the notice the same way).
+function checkNoticeFit() {
+  const el = document.getElementById('status-notice');
+  if (!el || !A().notice) return;
+  el.style.visibility = 'visible';
+  const n = el.getBoundingClientRect();
+  const l = document.getElementById('session-tag')?.getBoundingClientRect();
+  const r = document.getElementById('context-bar')?.getBoundingClientRect();
+  if ((l && n.left < l.right + 8) || (r && r.width > 0 && n.right > r.left - 8)) {
+    el.style.visibility = 'hidden';
+  }
+}
 
 // ══════════════════════════════════════════════════════════════════
 //  Scroll
@@ -725,7 +758,7 @@ function applyTheme(name, announce) {
   s.setProperty('--warning',      t.warning);
   s.setProperty('--error',        t.error);
   s.setProperty('--attention',    t.attention);
-  if (announce) A().sysMsg('Theme set to ' + name + '.');
+  if (announce) showNotice('Theme set to ' + name + '.');
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -917,14 +950,14 @@ async function cmdNew() {
     A().sessionId  = d.sessionId;
     A().sessionTag = shortId(d.sessionId);
     A().clearMessages();
-    A().sysMsg('New session started.');
+    showNotice('Started a new session.');
   } catch (e) { A().sysMsg('Error: ' + e.message); }
 }
 
 async function cmdSessions() {
   try {
     const list = await fetch('/api/sessions').then(r => r.json());
-    if (!list?.length) { A().sysMsg('No past sessions found.'); return; }
+    if (!list?.length) { showNotice('No past sessions yet.'); return; }
     A().openModal({
       kind:  'sessions',
       title: 'Choose session',
@@ -1011,7 +1044,7 @@ function setLoader(name, announce) {
   A().settings.UI.WorkingAnim = name;
   if (announce) {
     saveSettings();
-    A().sysMsg('Working animation set to ' + name + '.');
+    showNotice('Working animation set to ' + name + '.');
   }
 }
 
@@ -1056,14 +1089,14 @@ async function cmdAgents() {
 }
 
 async function cmdReloadAgents() {
-  A().sysMsg('Reloading agents…');
+  showNotice('Reloading agents...');
   try {
     const res = await fetch('/api/agents', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: '', provider: '', model: '', tools: [] }),
     });
-    A().sysMsg(res.ok ? 'Agents reloaded.' : 'Reload failed: ' + res.statusText);
-    if (res.ok) await loadStatus();
+    if (res.ok) { showNotice('Agents reloaded.'); await loadStatus(); }
+    else A().sysMsg('Reload failed: ' + res.statusText);
   } catch (e) { A().sysMsg('Error: ' + e.message); }
 }
 
@@ -1170,12 +1203,11 @@ async function switchSession(id) {
   A().sessionId  = id;
   A().sessionTag = shortId(id);
   A().clearMessages();
-  A().sysMsg('Loading session ' + shortId(id) + '…');
+  showNotice('Switched to ' + shortId(id) + ' — loading history...');
   try {
     const entries = await fetch('/api/transcript/' + id).then(r => r.json());
-    // Remove the "Loading…" badge
-    if (A().messages.at(-1)?.type === 'system') A().messages.splice(-1, 1);
     replayTranscript(entries);
+    showNotice('Switched to ' + shortId(id) + (entries?.length ? ' — history loaded.' : '.'));
   } catch (e) { A().sysMsg('Error: ' + e.message); }
 }
 
@@ -1214,7 +1246,7 @@ async function submitKeyImpl() {
     });
     if (res.ok) {
       A().closeModal(false);
-      A().sysMsg('API key saved for ' + provider + '.');
+      showNotice('API key saved for ' + provider + '.');
       await loadStatus();
     } else {
       const d = await res.json().catch(() => ({}));
@@ -1234,8 +1266,8 @@ async function submitAgentDetailImpl() {
       body: JSON.stringify({ id, provider, model, tools }),
     });
     A().closeModal(false);
-    A().sysMsg(res.ok ? 'Agent config saved. Backend rebuilding…' : 'Save failed: ' + res.statusText);
-    if (res.ok) await loadStatus();
+    if (res.ok) { showNotice('Agent config saved. Backend rebuilding...'); await loadStatus(); }
+    else A().sysMsg('Save failed: ' + res.statusText);
   } catch (e) { A().sysMsg('Error: ' + e.message); }
 }
 
@@ -1607,6 +1639,7 @@ async function init() {
   await Promise.all([loadThemes(), loadStatus(), loadSettings()]);
   wireInput();
   wireKeyboard();
+  window.addEventListener('resize', checkNoticeFit);
   document.getElementById('chat-input')?.focus();
 }
 
