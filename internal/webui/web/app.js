@@ -276,15 +276,15 @@ function scrollBottom() {
 // ══════════════════════════════════════════════════════════════════
 function lerpColor(hexA, hexB, amount) {
   if (!hexA || !hexB) return '#ffffff';
-  const a = hexA.replace('#', '');
-  const b = hexB.replace('#', '');
-  const rA = parseInt(a.slice(0, 2), 16);
-  const gA = parseInt(a.slice(2, 4), 16);
-  const bA = parseInt(a.slice(4, 6), 16);
+  const cleanA = hexA.replace('#', '');
+  const cleanB = hexB.replace('#', '');
+  const rA = parseInt(cleanA.slice(0, 2), 16);
+  const gA = parseInt(cleanA.slice(2, 4), 16);
+  const bA = parseInt(cleanA.slice(4, 6), 16);
 
-  const rB = parseInt(b.slice(0, 2), 16);
-  const gB = parseInt(b.slice(2, 4), 16);
-  const bB = parseInt(b.slice(4, 6), 16);
+  const rB = parseInt(cleanB.slice(0, 2), 16);
+  const gB = parseInt(cleanB.slice(2, 4), 16);
+  const bB = parseInt(cleanB.slice(4, 6), 16);
 
   const r = Math.round(rA + (rB - rA) * amount);
   const g = Math.round(gA + (gB - gA) * amount);
