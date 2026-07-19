@@ -49,6 +49,8 @@ document.addEventListener('alpine:init', () => {
     sessionId:     '',
     contextBar:    '',
     contextWindow: 0,
+    targetDescription: 'local host',
+    lastBackendNote: '',
 
     // ── Messages ─────────────────────────────────────────────
     messages:       [],
@@ -223,9 +225,14 @@ document.addEventListener('alpine:init', () => {
       this.modalVisible = true;
     },
 
-    closeModal(revertTheme) {
-      if (revertTheme && this.modal?.kind === 'theme' && this.modal.data?.origin) {
-        applyTheme(this.modal.data.origin, false);
+    closeModal(revertAll) {
+      if (revertAll) {
+        if (this.modal?.kind === 'theme' && this.modal.data?.origin) {
+          applyTheme(this.modal.data.origin, false);
+        }
+        if (this.modal?.kind === 'loader' && this.modal.data?.origin) {
+          setLoader(this.modal.data.origin, false);
+        }
       }
       this.modalVisible = false;
       this.modal        = null;
@@ -236,9 +243,12 @@ document.addEventListener('alpine:init', () => {
       if (!this.modal?.items?.length) return;
       const n = this.modal.items.length;
       this.modal.idx = (this.modal.idx + d + n) % n;
-      // Live theme preview
+      // Live theme/loader preview
       if (this.modal.kind === 'theme') {
         applyTheme(this.modal.items[this.modal.idx].id, false);
+      }
+      if (this.modal.kind === 'loader') {
+        setLoader(this.modal.items[this.modal.idx].id, false);
       }
       Alpine.nextTick(() => {
         document.querySelector('#modal-body .modal-row.selected')
@@ -261,19 +271,96 @@ function scrollBottom() {
   if (el) el.scrollTop = el.scrollHeight;
 }
 
+// Loader animation frames & delays (ms)
 // ══════════════════════════════════════════════════════════════════
-//  Spinner
-// ══════════════════════════════════════════════════════════════════
-const SPINNER_FRAMES = ['⣾','⣽','⣻','⢿','⡿','⣟','⣯','⣷'];
-let spinTick = 0, spinTimer = null;
+const LOADERS = {
+  "Equalizer": {
+    frames: ['▅   ▅', '▆   ▆', '▇ ▅ ▇', '▆ ▆ ▆', '▅ ▇ ▅', '▄ ▆ ▄', '▃ ▅ ▃', '▄ ▄ ▄'],
+    ms: 90
+  },
+  "Pulse Wave": {
+    frames: ['▁▂▃▄▅▆', '▂▃▄▅▆▇', '▃▄▅▆▇█', '▄▅▆▇█▇', '▅▆▇█▇▆', '▆▇█▇▆▅', '▇█▇▆▅▄', '█▇▆▅▄▃', '▇▆▅▄▃▂', '▆▅▄▃▂▁', '▅▄▃▂▁ ', '▄▃▂▁ ▂'],
+    ms: 70
+  },
+  "Orbit": {
+    frames: [
+      '○       ', '·○      ', '··○     ', '···○    ', '····○   ', '·····○  ', '······○ ', '·······○',
+      '······○·', '·····○··', '····○···', '···○····', '··○·····', '·○······'
+    ],
+    ms: 80
+  },
+  "Glitch Scan": {
+    frames: Array.from({length: 12}, () => {
+      return '▒' + Array.from({length: 8}, () => String.fromCharCode(33 + Math.floor(Math.random() * 93))).join('') + '▒';
+    }),
+    ms: 100
+  },
+  "Cylon Scanner": {
+    frames: [
+      '▕█       ▏', '▕▒█      ▏', '▕ ▒█     ▏', '▕  ▒█    ▏', '▕   ▒█   ▏', '▕    ▒█  ▏',
+      '▕     ▒█ ▏', '▕      ▒█▏', '▕       █▏', '▕      █▒▏', '▕     █▒ ▏', '▕    █▒  ▏',
+      '▕   █▒   ▏', '▕  █▒    ▏', '▕ █▒     ▏', '▕█▒      ▏'
+    ],
+    ms: 60
+  },
+  "Bouncing Dots": {
+    frames: [
+      '⠁    ', '⠂    ', '⠄    ', '⡀    ', ' ⠁   ', ' ⠂   ', ' ⠄   ', ' ⡀   ',
+      '  ⠁  ', '  ⠂  ', '  ⠄  ', '  ⡀  ', '   ⠁ ', '   ⠂ ', '   ⠄ ', '   ⡀ ',
+      '    ⠁', '    ⠂', '    ⠄', '    ⡀', '   ⠁ ', '   ⠂ ', '   ⠄ ', '   ⡀ ',
+      '  ⠁  ', '  ⠂  ', '  ⠄  ', '  ⡀  ', ' ⠁   ', ' ⠂   ', ' ⠄   ', ' ⡀   '
+    ],
+    ms: 50
+  },
+  "Matrix Rain": {
+    frames: Array.from({length: 12}, (_, i) => {
+      return Array.from({length: 8}, (_, j) => {
+        return (j === (i % 8)) ? '░' : (j === ((i + 1) % 8)) ? '▒' : (j === ((i + 2) % 8)) ? '▓' : ' ';
+      }).join('');
+    }),
+    ms: 90
+  },
+  "Braille Wave": {
+    frames: ['⣾','⣽','⣻','⢿','⡿','⣟','⣯','⣷'],
+    ms: 90
+  },
+  "Radar Sweep": {
+    frames: ['▕|      ▏', '▕/      ▏', '▕-      ▏', '▕\\      ▏', '▕ |     ▏', '▕ /     ▏', '▕ -     ▏', '▕ \\     ▏', '▕  |    ▏', '▕  /    ▏', '▕  -    ▏', '▕  \\    ▏'],
+    ms: 80
+  },
+  "Slash Trail": {
+    frames: [
+      '//      ', ' //     ', '  //    ', '   //   ', '    //  ', '     // ', '      //', '     // ', '    //  ', '   //   ', '  //    ', ' //     '
+    ],
+    ms: 80
+  }
+};
+
+let spinTimer = null;
+
+function startSpinning() {
+  stopSpinning();
+  let tick = 0;
+  const updateSpinner = () => {
+    const name = A().settings?.UI?.WorkingAnim || "Equalizer";
+    const cfg = LOADERS[name] || LOADERS["Equalizer"];
+    A().spinner = cfg.frames[tick++ % cfg.frames.length];
+    spinTimer = setTimeout(updateSpinner, cfg.ms);
+  };
+  updateSpinner();
+}
+
+function stopSpinning() {
+  if (spinTimer) { clearTimeout(spinTimer); spinTimer = null; }
+}
 
 function setStreaming(on, label) {
   A().isStreaming = on;
   if (on) {
     if (label) A().workingLabel = label;
-    if (!spinTimer) spinTimer = setInterval(() => { A().spinner = SPINNER_FRAMES[spinTick++ % SPINNER_FRAMES.length]; }, 90);
+    startSpinning();
   } else {
-    clearInterval(spinTimer); spinTimer = null;
+    stopSpinning();
   }
 }
 
@@ -338,8 +425,12 @@ async function loadStatus() {
     A().sessionId     = d.activeSessionId || A().sessionId;
     A().sessionTag    = shortId(A().sessionId);
     A().contextWindow = d.contextWindow || 0;
+    A().targetDescription = d.targetDescription || 'local host';
     updateContextBar(0, A().contextWindow);
-    if (d.backendNote) A().sysMsg(d.backendNote);
+    if (d.backendNote && d.backendNote !== A().lastBackendNote) {
+      A().sysMsg(d.backendNote);
+      A().lastBackendNote = d.backendNote;
+    }
   } catch (e) { console.error('loadStatus', e); }
 }
 
@@ -474,7 +565,7 @@ function runCommand(name) {
     case '/settings':      cmdSettings();     break;
     case '/key':           cmdKey();          break;
     case '/agents':        cmdAgents();       break;
-    case '/loader':        A().sysMsg('Working animation switching is not yet supported in the WebUI.'); break;
+    case '/loader':        cmdLoader();       break;
     case '/interrupt':     interrupt();       break;
     case '/reload-agents': cmdReloadAgents(); break;
     case '/exit':          window.close();    break;
@@ -546,15 +637,58 @@ function openTUISettings() {
   A().openModal({ kind: 'settings-tui', title: 'TUI Settings', items: buildTUIItems(), back: cmdSettings });
 }
 
+const LOADER_NAMES = [
+  "Equalizer",
+  "Pulse Wave",
+  "Orbit",
+  "Glitch Scan",
+  "Cylon Scanner",
+  "Bouncing Dots",
+  "Matrix Rain",
+  "Braille Wave",
+  "Radar Sweep",
+  "Slash Trail"
+];
+
+function cmdLoader() {
+  if (!A().settings) { A().sysMsg('Settings not loaded.'); return; }
+  const origin = A().settings.UI?.WorkingAnim || "Equalizer";
+  A().openModal({
+    kind:  'loader',
+    title: 'Choose animation',
+    items: LOADER_NAMES.map(name => ({ id: name, name: name, tag: name === origin ? 'current' : '' })),
+    idx:   Math.max(0, LOADER_NAMES.indexOf(origin)),
+    data:  { origin },
+  });
+}
+
+function setLoader(name, announce) {
+  if (!A().settings) return;
+  A().settings.UI.WorkingAnim = name;
+  saveSettings();
+  if (announce) A().sysMsg('Working animation set to ' + name + '.');
+}
+
 function openAgentSettings() {
+  const items = [
+    { id: 'permission', name: 'Tool approval mode', tag: modeTag() }
+  ];
+  if (A().settings?.Agent?.Target) {
+    items.push({ id: 'target', name: 'Tool execution target', tag: targetTag() });
+  }
   A().openModal({
     kind:  'settings-agent',
     title: 'Agent Settings',
-    items: [{ id: 'permission', name: 'Tool approval mode', tag: modeTag() }],
+    items: items,
     back: cmdSettings,
   });
 }
 function modeTag() { return (A().settings?.Agent?.PermissionMode || 'normal') + ' — select to cycle'; }
+function targetTag() {
+  const t = A().settings?.Agent?.Target?.Type || 'host';
+  const desc = A().targetDescription || 'local host';
+  return t + ' (' + desc + ') — select to cycle';
+}
 
 function cmdKey() { A().openModal({ kind: 'key', title: 'Set API key', items: [] }); }
 
@@ -632,7 +766,15 @@ function _doModalConfirm(item) {
       break;
 
     case 'settings-agent':
-      if (item) { toggleAgentSetting(item.id); A().modal.items = [{ id: 'permission', name: 'Tool approval mode', tag: modeTag() }]; }
+      if (item) toggleAgentSetting(item.id);
+      break;
+
+    case 'loader':
+      if (item) {
+        A().modal.data = null; // commit
+        setLoader(item.id, true);
+        A().closeModal(false);
+      }
       break;
 
     case 'agents':
@@ -658,6 +800,21 @@ function toggleAgentSetting(id) {
     s.Agent.PermissionMode = s.Agent.PermissionMode === 'normal' ? 'full-auto' : 'normal';
     A().autoAccept = s.Agent.PermissionMode === 'full-auto';
     saveSettings();
+    A().modal.items[0].tag = modeTag();
+  } else if (id === 'target') {
+    s.Agent.Target.Type = s.Agent.Target.Type === 'host' ? 'ssh' : 'host';
+    saveSettingsAndReconfigure();
+  }
+}
+
+async function saveSettingsAndReconfigure() {
+  await saveSettings();
+  await loadStatus();
+  if (A().modal?.kind === 'settings-agent') {
+    A().modal.items = [
+      { id: 'permission', name: 'Tool approval mode', tag: modeTag() },
+      { id: 'target', name: 'Tool execution target', tag: targetTag() }
+    ];
   }
 }
 
