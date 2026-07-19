@@ -181,7 +181,9 @@ html, body {
 .tool-args   { color: var(--text-muted); white-space: pre-wrap; word-break: break-all; flex: 1; }
 
 .tool-running  { color: var(--text-muted); font-style: italic; }
-.tool-result   { color: var(--success); white-space: pre-wrap; word-break: break-all; }
+/* break-word, not break-all: verbose results are real content (file text,
+   shell output) and shouldn't be chopped mid-word at every line edge. */
+.tool-result   { color: var(--success); white-space: pre-wrap; word-break: break-word; }
 .tool-approved { color: var(--success); }
 .tool-denied   { color: var(--error); }
 
