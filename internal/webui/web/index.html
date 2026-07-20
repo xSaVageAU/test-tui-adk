@@ -8,9 +8,13 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=12">
-  <!-- app.js runs first so its alpine:init listener is registered before Alpine starts -->
-  <script defer src="app.js?v=12"></script>
+  <!-- No ?v cache-busting needed: the Go server serves every asset with
+       Cache-Control: no-store. -->
+  <link rel="stylesheet" href="style.css">
+  <!-- js/main.js must come first: module and deferred scripts both run
+       after parse in document order, and store.js's alpine:init listener
+       has to be registered before Alpine initialises. -->
+  <script type="module" src="js/main.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"></script>
 </head>
 <body x-data>

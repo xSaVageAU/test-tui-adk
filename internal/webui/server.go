@@ -1,3 +1,12 @@
+// Package webui serves the browser frontend: static assets embedded from
+// web/ plus a JSON/SSE API mapped onto the same ui.Backend interface the
+// TUI uses. Handlers are split by resource — stream.go (streaming turns,
+// HITL confirmation, interrupt), sessions.go (session list/create/delete
+// and transcripts), config.go (status, key, agents, themes, settings,
+// files) — with the Server struct, routing, and shared helpers here.
+// Routes use Go 1.22+ ServeMux method/wildcard patterns, so method
+// dispatch and path-parameter parsing live in the route table, not the
+// handlers.
 package webui
 
 import (
@@ -6,14 +15,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"mime"
 	"net"
 	"net/http"
 	"strconv"
-	"strings"
 	"sync"
 
-	"tui-testing/internal/settings"
-	"tui-testing/internal/theme"
 	"tui-testing/internal/ui"
 
 	"github.com/google/uuid"
@@ -41,6 +48,13 @@ func StartServer(ctx context.Context, cfg ui.AppConfig, port int) error {
 		ctx:       ctx,
 	}
 
+	// Windows can map .js to text/plain via the registry, which breaks ES
+	// module loading — browsers enforce a JavaScript MIME type for module
+	// scripts. Pin the types we embed so FileServer never depends on the
+	// host's registry.
+	_ = mime.AddExtensionType(".js", "text/javascript; charset=utf-8")
+	_ = mime.AddExtensionType(".css", "text/css; charset=utf-8")
+
 	subFS, err := fs.Sub(webFS, "web")
 	if err != nil {
 		return fmt.Errorf("web filesystem build: %w", err)
@@ -51,20 +65,35 @@ func StartServer(ctx context.Context, cfg ui.AppConfig, port int) error {
 		fileServer.ServeHTTP(w, r)
 	})
 
+	// API routes live on their own mux: if they shared a mux with the "/"
+	// static catch-all, a wrong-method API request would fall through to
+	// the file server and 404 instead of getting ServeMux's automatic 405.
+	api := http.NewServeMux()
+
+	// config.go
+	api.HandleFunc("GET /api/status", s.handleStatus)
+	api.HandleFunc("POST /api/key", s.handleKey)
+	api.HandleFunc("GET /api/agents", s.handleGetAgents)
+	api.HandleFunc("POST /api/agents", s.handleUpdateAgents)
+	api.HandleFunc("GET /api/themes", s.handleThemes)
+	api.HandleFunc("GET /api/settings", s.handleGetSettings)
+	api.HandleFunc("POST /api/settings", s.handleSaveSettings)
+	api.HandleFunc("GET /api/files", s.handleFiles)
+
+	// sessions.go
+	api.HandleFunc("GET /api/sessions", s.handleListSessions)
+	api.HandleFunc("POST /api/sessions", s.handleNewSession)
+	api.HandleFunc("DELETE /api/sessions/{id}", s.handleDeleteSession)
+	api.HandleFunc("GET /api/transcript/{id}", s.handleTranscript)
+
+	// stream.go
+	api.HandleFunc("GET /api/stream", s.handleStream)
+	api.HandleFunc("POST /api/confirm", s.handleConfirm)
+	api.HandleFunc("POST /api/interrupt", s.handleInterrupt)
+
 	mux := http.NewServeMux()
 	mux.Handle("/", noCacheFileServer)
-	mux.HandleFunc("/api/status", s.handleStatus)
-	mux.HandleFunc("/api/sessions", s.handleSessions)
-	mux.HandleFunc("/api/sessions/", s.handleSessionDetail)
-	mux.HandleFunc("/api/transcript/", s.handleTranscript)
-	mux.HandleFunc("/api/stream", s.handleStream)
-	mux.HandleFunc("/api/confirm", s.handleConfirm)
-	mux.HandleFunc("/api/key", s.handleKey)
-	mux.HandleFunc("/api/agents", s.handleAgents)
-	mux.HandleFunc("/api/interrupt", s.handleInterrupt)
-	mux.HandleFunc("/api/themes", s.handleThemes)
-	mux.HandleFunc("/api/settings", s.handleSettings)
-	mux.HandleFunc("/api/files", s.handleFiles)
+	mux.Handle("/api/", api)
 
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 	listener, err := net.Listen("tcp", addr)
@@ -90,447 +119,9 @@ func StartServer(ctx context.Context, cfg ui.AppConfig, port int) error {
 	return srv.Serve(listener)
 }
 
-func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	var specialists []string
-	var modelName string
-	var contextWindow int
-	if s.backend != nil {
-		specialists = s.backend.Specialists()
-		modelName = s.backend.ModelName()
-		contextWindow = s.backend.ContextWindow()
-	}
-
-	desc := "local host"
-	if s.cfg.ConfigureTarget != nil {
-		if d, err := s.cfg.ConfigureTarget(); err == nil && d != "" {
-			desc = d
-		}
-	}
-
-	resp := map[string]any{
-		"modelName":         modelName,
-		"specialists":       specialists,
-		"contextWindow":     contextWindow,
-		"targetDescription": desc,
-		"backendNote":       s.cfg.BackendNote,
-		"activeSessionId":   s.sessionID,
-	}
-
+// writeJSON sets the content type and encodes v; encode errors are not
+// recoverable mid-response, so they are deliberately ignored.
+func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
-}
-
-// handleFiles serves the file-tree sidebar: one directory's listing per
-// call, VS Code-style lazy loading (?dir= is slash-separated relative to
-// the target's cwd; empty lists the cwd itself — see tools.ListDir via
-// the AppConfig closure). Deliberately not under s.mu — an SFTP ReadDir
-// can be slow and the closure touches nothing the mutex guards; the
-// sidebar polls this while open, so it must never stall streaming or
-// status calls.
-func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if s.cfg.ListTargetDir == nil {
-		http.Error(w, "File tree not supported", http.StatusNotFound)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s.cfg.ListTargetDir(r.URL.Query().Get("dir")))
-}
-
-func (s *Server) handleKey(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req struct {
-		Provider string `json:"provider"`
-		Key      string `json:"key"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	if s.cfg.NewBackend == nil {
-		http.Error(w, "API key update not supported", http.StatusNotImplemented)
-		return
-	}
-
-	backend, err := s.cfg.NewBackend(s.ctx, req.Provider, req.Key)
-	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-		return
-	}
-
-	s.mu.Lock()
-	s.backend = backend
-	s.cfg.BackendNote = ""
-	s.mu.Unlock()
-
-	w.WriteHeader(http.StatusOK)
-}
-
-func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet {
-		if s.backend == nil {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode([]any{})
-			return
-		}
-		sessions, err := s.backend.ListSessions(s.ctx)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(sessions)
-		return
-	}
-
-	if r.Method == http.MethodPost {
-		s.mu.Lock()
-		s.sessionID = uuid.NewString()
-		s.mu.Unlock()
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"sessionId": s.sessionID})
-		return
-	}
-
-	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-}
-
-func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	id := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
-	if id == "" {
-		http.Error(w, "Session ID required", http.StatusBadRequest)
-		return
-	}
-
-	if s.backend == nil {
-		http.Error(w, "Backend not connected", http.StatusBadRequest)
-		return
-	}
-
-	err := s.backend.DeleteSession(s.ctx, id)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	s.mu.Lock()
-	if s.sessionID == id {
-		s.sessionID = uuid.NewString()
-	}
-	s.mu.Unlock()
-
-	w.WriteHeader(http.StatusOK)
-}
-
-func (s *Server) handleTranscript(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	id := strings.TrimPrefix(r.URL.Path, "/api/transcript/")
-	if id == "" {
-		http.Error(w, "Session ID required", http.StatusBadRequest)
-		return
-	}
-
-	if s.backend == nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]any{})
-		return
-	}
-
-	entries, err := s.backend.GetTranscript(s.ctx, id)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	s.mu.Lock()
-	s.sessionID = id // Sync active session
-	s.mu.Unlock()
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(entries)
-}
-
-func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
-	if s.backend == nil {
-		http.Error(w, "Backend not connected. Use /api/key first.", http.StatusBadRequest)
-		return
-	}
-
-	message := r.URL.Query().Get("message")
-	sessionID := r.URL.Query().Get("sessionId")
-
-	if message == "" {
-		http.Error(w, "Message parameter required", http.StatusBadRequest)
-		return
-	}
-
-	s.mu.Lock()
-	if sessionID != "" {
-		s.sessionID = sessionID
-	} else {
-		sessionID = s.sessionID
-	}
-
-	if s.activeCancel != nil {
-		s.activeCancel()
-	}
-	ctx, cancel := context.WithCancel(s.ctx)
-	s.activeCancel = cancel
-	s.mu.Unlock()
-
-	defer func() {
-		s.mu.Lock()
-		s.activeCancel = nil
-		s.mu.Unlock()
-	}()
-
-	stream, err := s.backend.Stream(ctx, sessionID, message)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	s.writeSSEStream(w, stream)
-}
-
-func (s *Server) handleConfirm(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	if s.backend == nil {
-		http.Error(w, "Backend not connected", http.StatusBadRequest)
-		return
-	}
-
-	var req struct {
-		SessionID string                     `json:"sessionId"`
-		Decisions []ui.ConfirmationDecision `json:"decisions"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	s.mu.Lock()
-	if req.SessionID != "" {
-		s.sessionID = req.SessionID
-	}
-	sessionID := s.sessionID
-
-	if s.activeCancel != nil {
-		s.activeCancel()
-	}
-	ctx, cancel := context.WithCancel(s.ctx)
-	s.activeCancel = cancel
-	s.mu.Unlock()
-
-	defer func() {
-		s.mu.Lock()
-		s.activeCancel = nil
-		s.mu.Unlock()
-	}()
-
-	stream, err := s.backend.RespondToConfirmation(ctx, sessionID, req.Decisions)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	s.writeSSEStream(w, stream)
-}
-
-func (s *Server) handleInterrupt(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.activeCancel != nil {
-		s.activeCancel()
-		s.activeCancel = nil
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	w.WriteHeader(http.StatusConflict) // No active turn to cancel
-}
-
-func (s *Server) handleThemes(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	themes := theme.Load()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(themes)
-}
-
-func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet {
-		sett := settings.Load()
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(sett)
-		return
-	}
-
-	if r.Method == http.MethodPost {
-		var sett settings.Settings
-		if err := json.NewDecoder(r.Body).Decode(&sett); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if err := settings.Save(sett); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if s.cfg.ConfigureTarget != nil {
-			_, _ = s.cfg.ConfigureTarget()
-		}
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-}
-
-func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet {
-		if s.cfg.ListAgents == nil || s.cfg.ListTools == nil {
-			http.Error(w, "Agents configuration not supported", http.StatusNotImplemented)
-			return
-		}
-
-		agents, err := s.cfg.ListAgents()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		tools, err := s.cfg.ListTools()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		resp := map[string]any{
-			"agents": agents,
-			"tools":  tools,
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
-		return
-	}
-
-	if r.Method == http.MethodPost {
-		var req struct {
-			ID       string   `json:"id"`
-			Provider string   `json:"provider"`
-			Model    string   `json:"model"`
-			Tools    []string `json:"tools"`
-		}
-
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		if s.cfg.SetAgentProvider != nil && req.Provider != "" {
-			if err := s.cfg.SetAgentProvider(req.ID, req.Provider); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-		}
-
-		if s.cfg.SetAgentModel != nil && req.Model != "" {
-			if err := s.cfg.SetAgentModel(req.ID, req.Model); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-		}
-
-		if s.cfg.SetAgentTools != nil {
-			if err := s.cfg.SetAgentTools(req.ID, req.Tools); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-		}
-
-		// Rebuild the backend dynamically from the new disk config files
-		if s.cfg.NewBackend != nil {
-			backend, err := s.cfg.NewBackend(s.ctx, "", "")
-			if err != nil {
-				http.Error(w, "rebuilding backend: "+err.Error(), http.StatusInternalServerError)
-				return
-			}
-			s.mu.Lock()
-			s.backend = backend
-			s.mu.Unlock()
-		}
-
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-}
-
-func (s *Server) writeSSEStream(w http.ResponseWriter, stream <-chan ui.StreamChunk) {
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
-		return
-	}
-
-	for {
-		select {
-		case chunk, ok := <-stream:
-			if !ok {
-				// Stream finished normally
-				return
-			}
-			data, err := json.Marshal(chunk)
-			if err != nil {
-				continue
-			}
-			_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
-			flusher.Flush()
-		case <-s.ctx.Done():
-			return
-		}
-	}
+	_ = json.NewEncoder(w).Encode(v)
 }
