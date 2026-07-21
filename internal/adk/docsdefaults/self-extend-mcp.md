@@ -103,14 +103,37 @@ this app's own repo):
 
 ```
 go mod init mytool
-go get github.com/modelcontextprotocol/go-sdk@v1.4.1
+go get github.com/modelcontextprotocol/go-sdk@latest
 go build -o ~/.tui-testing/mcpservers-bin/mytool.exe .
 ```
 
-(If this app's own `go.mod` now lists a newer `go-sdk` version than
-`v1.4.1`, match that version instead.)
+**Use `@latest`, not a version you recall from an earlier attempt or from
+this app's own source** — you generally won't have this app's source
+available to check (you're most likely running as a standalone installed
+binary, not from a checkout), so there is nothing reliable to match
+against. `@latest` always resolves to the actual current stable release.
+There is no protocol requirement that your server use the same SDK
+version as this app's own MCP client — MCP is a standardized wire
+protocol, not a shared-library contract, so any conforming version works
+against any other.
+
+Do **not** follow `go get` with `go mod tidy` — `go get <pkg>@latest`
+already resolves and records everything needed on its own, and running
+`tidy` afterward risks re-resolving to a different version than you just
+pinned if anything else about the module changes. If a later SDK release
+ever changes its Go API shape (as has happened before — check the error
+message against the actual installed version if a build fails on a field
+or type that this example uses), fix the code to match what actually got
+installed rather than pinning backwards to an older version.
 
 Then write the TOML and edit `agent.json` as described above.
+
+On Windows, run each build step with `run_shell`'s `working_dir`
+parameter set to the new module's directory rather than an inline `cd` —
+`cd` does not change the current drive, so a leading `cd` into a
+different-drive path silently leaves you in the wrong directory (and
+`go mod init` will then complain about this app's own `go.mod` already
+existing, since that's genuinely where you still are).
 
 `reverse_text`/`mytool` above are placeholder names — this example is
 illustrative, not something already installed. Replace them with
