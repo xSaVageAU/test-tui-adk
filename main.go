@@ -121,10 +121,19 @@ func main() {
 		modelName = client.ModelName()
 		contextWindow = client.ContextWindow()
 	case apiKey != "":
-		// A key was present but didn't work — worth surfacing, unlike the
-		// no-key case below, which the /key popup now explains itself the
-		// moment it's actually needed (see App.sendMessage).
-		note = fmt.Sprintf("Could not connect with %s: %v. Use /key to try again.", keySource, err)
+		// A key was present but adk.New still failed — worth surfacing,
+		// unlike the no-key case below, which the /key popup now explains
+		// itself the moment it's actually needed (see App.sendMessage).
+		// Deliberately doesn't say "could not connect" or suggest /key:
+		// adk.New fails for plenty of reasons that have nothing to do with
+		// the key (an unknown tool/mcp server name in agent.json, a
+		// malformed sub-agent config, ...), and blaming the key for those
+		// is actively misleading — it sends the user to retype a working
+		// key when the real fix is editing a config file. err's own
+		// message is already specific about what actually broke;
+		// keySource is kept only as neutral context (which key was in
+		// play), not as an accusation.
+		note = fmt.Sprintf("Could not build the agent (using %s): %v", keySource, err)
 	}
 
 	// Install the execution target (local host, or a remote SSH machine if

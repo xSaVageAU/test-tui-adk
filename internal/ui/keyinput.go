@@ -171,7 +171,14 @@ func (a *App) submitKey() tea.Cmd {
 	label := providerDisplayName(provider) + " API key set."
 	return tea.Batch(backCmd, func() tea.Msg {
 		backend, err := factory(context.Background(), provider, apiKey)
-		return keySetMsg{backend: backend, err: err, successMsg: label, failPrefix: "Could not connect with that key"}
+		// "Could not build the agent", not "could not connect with that
+		// key": factory (newBackend) fails for plenty of reasons that
+		// have nothing to do with the key just typed in (an unknown
+		// tool/mcp server name in agent.json, a malformed sub-agent
+		// config, ...) — blaming the key for those sends the user back
+		// into this same popup to retype a key that was never the
+		// problem, when the real fix is editing a config file instead.
+		return keySetMsg{backend: backend, err: err, successMsg: label, failPrefix: "Could not build the agent"}
 	})
 }
 
