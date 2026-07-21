@@ -31,9 +31,18 @@ import (
 // exactly the hook whatever replaces this will want to read. (A
 // "reasoning" badge was tried here first, but it belonged next to the
 // transcript's per-message "agent" label instead — see chat.go's
-// renderMessage — not here.)
-func renderTopBar(s theme.Styles, width int, sessionID string, contextUsed, contextWindow int) string {
+// renderMessage — not here.) The center now hosts the transient status
+// notice (see notice.go) — the "something else" that replaced it.
+func renderTopBar(s theme.Styles, width int, sessionID, notice string, contextUsed, contextWindow int) string {
 	meta := s.HeaderSession.Render(shortSessionID(sessionID))
+
+	// The notice reuses MessageEvent — the exact badge treatment these
+	// events had when they lived in the transcript, so a relocated event
+	// still reads as the same kind of thing.
+	center := ""
+	if notice != "" {
+		center = s.MessageEvent.Render(notice)
+	}
 
 	// s.Header.Width(width) below renders at the terminal's full width —
 	// matching the viewport below it, so there's no gap on the right
@@ -41,11 +50,38 @@ func renderTopBar(s theme.Styles, width int, sessionID string, contextUsed, cont
 	// Padding(0,1) applied inside that, so the content area actually
 	// available for meta+bar is 2 narrower than width, not width itself.
 	contentWidth := max(width-2, 0)
-	content := joinLeftRight(s, meta, renderContextBar(s, contextUsed, contextWindow), contentWidth)
+	content := joinLeftCenterRight(s, meta, center, renderContextBar(s, contextUsed, contextWindow), contentWidth)
 
 	line := s.Header.Width(width).Render(content)
 	rule := s.HeaderRule.Render(strings.Repeat("─", width))
 	return line + "\n" + rule
+}
+
+// joinLeftCenterRight is joinLeftRight plus an optional centered badge:
+// center is anchored at the absolute middle of the line (not centered in
+// the leftover gap, so it sits in the same spot regardless of how wide
+// either side happens to be) and is dropped entirely — never truncated,
+// never allowed to push the sides — when it can't fit there with at
+// least one space of clearance against both neighbors. A transient
+// notice that briefly can't show on a narrow terminal is a better
+// outcome than a layout that jumps or a badge chopped mid-word.
+func joinLeftCenterRight(s theme.Styles, left, center, right string, width int) string {
+	base := joinLeftRight(s, left, right, width)
+	if center == "" {
+		return base
+	}
+	lw, cw, rw := lipgloss.Width(left), lipgloss.Width(center), lipgloss.Width(right)
+	start := (width - cw) / 2
+	if start < lw+1 || start+cw > width-rw-1 {
+		return base
+	}
+	// Gaps render through a style for the same reason joinLeftRight's
+	// does — see its doc comment.
+	line := left + s.HeaderTitle.Render(strings.Repeat(" ", start-lw)) + center
+	if right == "" {
+		return line
+	}
+	return line + s.HeaderTitle.Render(strings.Repeat(" ", width-rw-start-cw)) + right
 }
 
 // joinLeftRight places right at the far end of a width-wide line, left

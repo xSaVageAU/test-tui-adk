@@ -165,7 +165,10 @@ func (a *App) dispatchToBackend(text string) tea.Cmd {
 // in Update, worded as a deliberate stop there rather than an error.
 func (a *App) stopTurn() {
 	a.turnCancel()
-	a.systemMessage("Stopping...")
+	// Transient progress — the definitive "Stopped." transcript marker
+	// still lands when the cancellation actually completes (see Update's
+	// agentReplyMsg/streamChunkMsg handlers).
+	a.setNotice("Stopping...")
 }
 
 // interruptAndSend is /interrupt's handler — stop whatever's running

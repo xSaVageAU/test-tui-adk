@@ -164,7 +164,9 @@ func TestCancelMenuReportsAgentToolsChangedRegardlessOfPaletteKind(t *testing.T)
 
 	a.cancelMenu()
 
-	if !anyMessageContains(a.messages, "Tools updated") {
+	// The report is a transient top-bar notice, not a transcript message
+	// — see notice.go for the notice/systemMessage split.
+	if !strings.Contains(a.notice, "Tools updated") {
 		t.Fatal("cancelMenu should report a pending tools reload when agentToolsChanged is true")
 	}
 	if a.paletteKind != paletteNone {
