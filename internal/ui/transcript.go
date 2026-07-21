@@ -8,6 +8,7 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -29,6 +30,7 @@ func (a *App) upsertToolMessage(id, name string, args map[string]any, status str
 	if idx, ok := a.toolMsgIndex[id]; ok && idx < len(a.messages) {
 		a.messages[idx].ToolStatus = status
 		a.messages[idx].ToolPending = pending
+		a.touchMessages()
 		return
 	}
 	a.newToolMessage(id, ChatMessage{ToolName: name, ToolArgs: args, ToolStatus: status, ToolPending: pending, At: time.Now()})
@@ -49,6 +51,7 @@ func (a *App) completeToolMessage(id, name string, result map[string]any) {
 		a.messages[idx].ToolResult = result
 		a.messages[idx].ToolStatus = ""
 		a.messages[idx].ToolPending = false
+		a.touchMessages()
 		return
 	}
 	// Shouldn't happen — a result always follows its own call, whose
@@ -79,6 +82,7 @@ func (a *App) newToolMessage(id string, msg ChatMessage) {
 
 	a.messages = append(a.messages, ChatMessage{Role: RoleAgent, Content: "", At: time.Now()})
 	a.streamingMsgIndex = len(a.messages) - 1
+	a.touchMessages()
 }
 
 // dropEmptyStreamingPlaceholder removes the in-progress agent placeholder
@@ -98,6 +102,7 @@ func (a *App) dropEmptyStreamingPlaceholder() {
 		a.messages[a.streamingMsgIndex].Role == RoleAgent &&
 		a.messages[a.streamingMsgIndex].Content == "" {
 		a.messages = append(a.messages[:a.streamingMsgIndex], a.messages[a.streamingMsgIndex+1:]...)
+		a.touchMessages()
 	}
 }
 
@@ -116,15 +121,65 @@ func (a *App) applyTheme() {
 	a.refreshTranscript()
 }
 
+// touchMessages must be called by every write to a.messages — see its
+// own doc comment in app.go for the full reasoning. Cheap: just an int
+// increment, so there's no cost to calling it defensively even where a
+// caller already knows a recompute is about to happen anyway.
+func (a *App) touchMessages() {
+	a.messagesRevision++
+}
+
+// transcriptCacheKey is every input renderTranscript's output depends
+// on besides the messages themselves, which are covered separately by
+// revision (see touchMessages). refreshTranscript only actually calls
+// renderTranscript when this, or revision, differs from the last render
+// — the common case (an idle cursor blink, typing into the input box —
+// neither touches messages or anything else here) is a plain cache hit.
+// Every field must be a comparable type (no slices/maps), so the whole
+// key can be compared with == — specialists is joined into one string
+// for exactly that reason.
+type transcriptCacheKey struct {
+	revision        int
+	width           int
+	theme           string
+	highlightUser   bool
+	verboseTools    bool
+	showReasoning   bool
+	maxPreviewLines int
+	specialists     string
+}
+
 // refreshTranscript re-renders the transcript into the viewport at
 // whatever scroll position the viewport is already at — it never moves
 // YOffset itself. This is the one layout() calls on nearly every
 // keystroke, resize, and cursor blink, so it has to leave scrolling
 // alone; see followTranscript for the variant that's allowed to move it.
+//
+// The actual re-render (renderTranscript, a full pass over every message
+// — real cost on a long transcript) only runs when transcriptCacheKey
+// has changed since the last call; otherwise this just re-applies the
+// cached content, which is what makes the keystroke/blink case cheap
+// regardless of how large the transcript has grown. theme is
+// bootInfo.Theme (a plain string) rather than a.styles directly —
+// theme.Styles isn't a comparable type, and the theme's name changing is
+// exactly the signal a real style change happened (see applyTheme).
 func (a *App) refreshTranscript() {
-	content, userMsgLines := renderTranscript(a.styles, a.messages, a.viewport.Width(), a.highlightUser, a.verboseTools, a.showReasoning, a.effectiveToolPreviewMaxLines(), a.bootInfo.Specialists)
-	a.viewport.SetContent(content)
-	a.userMsgLines = userMsgLines
+	key := transcriptCacheKey{
+		revision:        a.messagesRevision,
+		width:           a.viewport.Width(),
+		theme:           a.bootInfo.Theme,
+		highlightUser:   a.highlightUser,
+		verboseTools:    a.verboseTools,
+		showReasoning:   a.showReasoning,
+		maxPreviewLines: a.effectiveToolPreviewMaxLines(),
+		specialists:     strings.Join(a.bootInfo.Specialists, "\x00"),
+	}
+	if key != a.transcriptCacheKey || a.transcriptCacheContent == "" {
+		a.transcriptCacheContent, a.transcriptCacheUserMsgLines = renderTranscript(a.styles, a.messages, key.width, a.highlightUser, a.verboseTools, a.showReasoning, key.maxPreviewLines, a.bootInfo.Specialists)
+		a.transcriptCacheKey = key
+	}
+	a.viewport.SetContent(a.transcriptCacheContent)
+	a.userMsgLines = a.transcriptCacheUserMsgLines
 }
 
 // followTranscript is refreshTranscript's counterpart for the call sites

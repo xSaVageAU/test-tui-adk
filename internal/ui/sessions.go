@@ -41,6 +41,7 @@ func (a *App) turnInProgress() bool {
 // user about it.
 func (a *App) resetTranscriptState() {
 	a.messages = nil
+	a.touchMessages()
 	a.streamingMsgIndex = 0
 	a.toolMsgIndex = nil
 	a.pendingConfirmation = nil
@@ -124,6 +125,7 @@ func (a *App) replayTranscript(entries []TranscriptEntry) {
 		}
 	}
 	a.dropEmptyStreamingPlaceholder()
+	a.touchMessages()
 }
 
 // sessionsLoadedMsg carries the result of the async ListSessions call

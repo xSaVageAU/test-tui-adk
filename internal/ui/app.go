@@ -53,9 +53,30 @@ type App struct {
 	width, height int
 	ready         bool
 
-	status        theme.StatusKind
-	messages      []ChatMessage
-	highlightUser bool // experimental: backdrop highlight behind user messages
+	status theme.StatusKind
+	// messages is the transcript's actual data — appending a new entry or
+	// mutating any existing one's fields in place (a streaming reply's
+	// growing Content, a tool call's ToolStatus/ToolResult arriving,
+	// reasoning fields, FinishReason, ...) MUST be followed by a call to
+	// touchMessages(). refreshTranscript's cache (see transcript.go) is
+	// what makes a cursor blink or an ordinary keystroke — which never
+	// touch messages, but used to trigger a full re-render of the entire
+	// transcript anyway via layout(), on nearly every message Bubble Tea
+	// delivers — cheap instead of paying full re-wrap/re-style cost for
+	// no reason; touchMessages is the one thing that tells it a real
+	// recompute is actually needed. Forgetting it at a new mutation site
+	// doesn't crash anything — it just means that mutation silently fails
+	// to show up until something else happens to invalidate the cache
+	// (a resize, a theme swap, a settings toggle), so it's worth getting
+	// right rather than assuming a later refresh will cover it.
+	messages []ChatMessage
+	// messagesRevision/transcriptCache* back refreshTranscript's cache —
+	// see messages' own doc comment above and transcript.go.
+	messagesRevision            int
+	transcriptCacheKey          transcriptCacheKey
+	transcriptCacheContent      string
+	transcriptCacheUserMsgLines []int
+	highlightUser               bool // experimental: backdrop highlight behind user messages
 	streamReplies bool // token-by-token replies via Backend.Stream instead of Send
 	verboseTools  bool // false shows a one-line lean summary per tool call/result; see chat.go's formatToolArgs/formatToolResult
 	showReasoning bool // false hides ChatMessage.ReasoningText but leaves the "thinking/thought for Xs" badge alone; see settings.UISettings.HideReasoningText for why this field's polarity is flipped at the persistence boundary
@@ -475,6 +496,7 @@ func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// stopwatch's own Elapsed() — see App.reasoning's doc comment.
 		if a.reasoning && a.streamingMsgIndex < len(a.messages) {
 			a.messages[a.streamingMsgIndex].ReasoningDuration = time.Since(a.reasoningStart)
+			a.touchMessages()
 			a.refreshTranscript()
 		}
 		return a, cmd
@@ -503,6 +525,7 @@ func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, cmd
 		}
 		a.messages = append(a.messages, ChatMessage{Role: RoleAgent, Content: msg.text, At: time.Now()})
+		a.touchMessages()
 		a.status = theme.StatusIdle
 		cmd := a.concludeTurn()
 		a.followTranscript()
@@ -514,6 +537,7 @@ func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// even if something else gets appended to the transcript mid-stream.
 		a.messages = append(a.messages, ChatMessage{Role: RoleAgent, Content: "", At: time.Now()})
 		a.streamingMsgIndex = len(a.messages) - 1
+		a.touchMessages()
 		a.streamChan = msg.ch
 		a.followTranscript()
 		return a, readStreamChunk(msg.ch)
@@ -578,6 +602,7 @@ func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd = a.startReasoning()
 			if a.streamingMsgIndex < len(a.messages) {
 				a.messages[a.streamingMsgIndex].ReasoningText += msg.chunk.Reasoning
+				a.touchMessages()
 			}
 		case msg.chunk.ReloadRequested:
 			// Just latch the flag — concludeTurn (called once this turn
@@ -588,6 +613,7 @@ func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		default:
 			cmd = a.endReasoning()
 			a.messages[a.streamingMsgIndex].Content += msg.chunk.Text
+			a.touchMessages()
 		}
 		a.followTranscript()
 		return a, tea.Batch(cmd, readStreamChunk(a.streamChan))

@@ -52,6 +52,7 @@ func (a *App) sendMessage(text string) tea.Cmd {
 		// no turn to hide behind here, the message is just waiting on a
 		// key, not competing with one already in flight.
 		a.messages = append(a.messages, ChatMessage{Role: RoleUser, Content: text, At: time.Now()})
+		a.touchMessages()
 		a.lastPromptText = text
 		a.viewport.GotoBottom()
 		a.pendingMessage = text
@@ -82,6 +83,7 @@ func (a *App) sendMessage(text string) tea.Cmd {
 // blocking a queued message has genuinely ended.
 func (a *App) sendNow(text string) tea.Cmd {
 	a.messages = append(a.messages, ChatMessage{Role: RoleUser, Content: text, At: time.Now()})
+	a.touchMessages()
 	a.lastPromptText = text
 	// Sending is a deliberate action, unlike the steady trickle of
 	// keystroke-driven refreshes elsewhere — always follow it to the
@@ -297,6 +299,7 @@ func (a *App) startReasoning() tea.Cmd {
 	if a.streamingMsgIndex < len(a.messages) {
 		a.messages[a.streamingMsgIndex].ReasoningActive = true
 		a.messages[a.streamingMsgIndex].ReasoningDuration = 0
+		a.touchMessages()
 	}
 	return a.stopwatch.Start()
 }
@@ -315,6 +318,7 @@ func (a *App) endReasoning() tea.Cmd {
 	if a.streamingMsgIndex < len(a.messages) {
 		a.messages[a.streamingMsgIndex].ReasoningActive = false
 		a.messages[a.streamingMsgIndex].ReasoningDuration = time.Since(a.reasoningStart)
+		a.touchMessages()
 	}
 	return a.stopwatch.Stop()
 }
@@ -343,6 +347,7 @@ func (a *App) attachTurnFinishReason() {
 	for i := len(a.messages) - 1; i >= 0; i-- {
 		if a.messages[i].Role == RoleAgent {
 			a.messages[i].FinishReason = reason
+			a.touchMessages()
 			return
 		}
 	}

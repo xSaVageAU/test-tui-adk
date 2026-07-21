@@ -489,5 +489,6 @@ func (a *App) persistSettings() {
 
 func (a *App) systemMessage(text string) {
 	a.messages = append(a.messages, ChatMessage{Role: RoleSystem, Content: text, At: time.Now()})
+	a.touchMessages()
 	a.followTranscript()
 }

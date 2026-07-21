@@ -197,6 +197,7 @@ func (a *App) resolveConfirmation(approved bool) tea.Cmd {
 	if pc.msgIndex < len(a.messages) {
 		a.messages[pc.msgIndex].ToolStatus = status
 		a.messages[pc.msgIndex].ToolPending = false
+		a.touchMessages()
 	}
 	a.confirmDecisions = append(a.confirmDecisions, ConfirmationDecision{ID: pc.id, Approved: approved})
 
