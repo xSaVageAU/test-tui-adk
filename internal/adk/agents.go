@@ -138,20 +138,26 @@ func ConfigureExecutionTarget() (string, error) { return tools.ConfigureTarget()
 // connection) as the app exits.
 func CloseExecutionTarget() { tools.CloseTarget() }
 
-// rootInstructionFor appends a generated "Available specialists" list
-// (name plus description, in loadSubAgentConfigs' order) to base — the
-// root's own instruction.md content — so the root always knows what it
-// can currently consult even though that set can grow, shrink, or start
-// out empty, without the user needing to maintain that list by hand.
+// rootInstructionFor appends generated content to base — the root's own
+// instruction.md content — that can't be static prose: a "Available
+// specialists" list (name plus description, in loadSubAgentConfigs'
+// order, so the root always knows what it can currently consult without
+// the user maintaining that list by hand) and the self-extend-mcp.md
+// pointer (see selfExtendDocNote — it needs this machine's actual
+// resolved appdir path, which no hardcoded sentence in instruction.md
+// could give it).
 func rootInstructionFor(base string, subAgents []agent.Agent) string {
-	if len(subAgents) == 0 {
-		return base
-	}
 	var b strings.Builder
 	b.WriteString(base)
-	b.WriteString(" Available specialists:")
-	for _, sa := range subAgents {
-		fmt.Fprintf(&b, "\n- %s: %s", sa.Name(), sa.Description())
+	if len(subAgents) > 0 {
+		b.WriteString(" Available specialists:")
+		for _, sa := range subAgents {
+			fmt.Fprintf(&b, "\n- %s: %s", sa.Name(), sa.Description())
+		}
+	}
+	if note := selfExtendDocNote(); note != "" {
+		b.WriteString(" ")
+		b.WriteString(note)
 	}
 	return b.String()
 }

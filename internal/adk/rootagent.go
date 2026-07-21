@@ -46,6 +46,9 @@ func loadRootAgentConfig() (agentFileConfig, error) {
 	if err := seedIfMissing(dir); err != nil {
 		return agentFileConfig{}, err
 	}
+	if err := materializeDocs(); err != nil {
+		return agentFileConfig{}, err
+	}
 
 	cfg, err := loadAgentFileConfig(dir)
 	if err != nil {
