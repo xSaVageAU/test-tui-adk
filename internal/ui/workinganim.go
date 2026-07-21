@@ -161,7 +161,7 @@ func (w *workingAnimState) render(t theme.Theme, width int, label string) string
 // color. Post-migration, a cell with no explicit color already shows
 // the theme's background automatically (see app.go's View() doc
 // comment on v.BackgroundColor), so this compensation is redundant now.
-func bgStyle(t theme.Theme) lipgloss.Style {
+func bgStyle(_ theme.Theme) lipgloss.Style {
 	return lipgloss.NewStyle()
 }
 
@@ -171,7 +171,7 @@ func bgStyle(t theme.Theme) lipgloss.Style {
 // redundant-compensation reasoning as bgStyle above: Width()'s own
 // padding no longer needs an explicit Background to avoid showing the
 // terminal's raw default.
-func blankAnimLine(t theme.Theme, width int) string {
+func blankAnimLine(_ theme.Theme, width int) string {
 	return lipgloss.NewStyle().Width(width).Render("")
 }
 
