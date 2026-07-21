@@ -20,7 +20,7 @@ import (
 // at, so PgUp/PgDn can jump viewport.YOffset straight to a prompt instead
 // of scrolling a fixed page height — cheap to compute here alongside the
 // render pass instead of re-walking the content separately.
-func renderTranscript(s theme.Styles, messages []ChatMessage, width int, highlightUser, verboseTools, showReasoning bool, maxPreviewLines int) (content string, userMsgLines []int) {
+func renderTranscript(s theme.Styles, messages []ChatMessage, width int, highlightUser, verboseTools, showReasoning bool, maxPreviewLines int, specialists []string) (content string, userMsgLines []int) {
 	var sb strings.Builder
 	bootBlock := renderBootArt(s, width)
 	sb.WriteString(bootBlock)
@@ -49,7 +49,7 @@ func renderTranscript(s theme.Styles, messages []ChatMessage, width int, highlig
 		writeBlock(s.MessageSystem.Render("No messages yet — say something below."), false)
 	} else {
 		for _, m := range messages {
-			startLine := writeBlock(renderMessage(s, m, width, highlightUser, verboseTools, showReasoning, maxPreviewLines), false)
+			startLine := writeBlock(renderMessage(s, m, width, highlightUser, verboseTools, showReasoning, maxPreviewLines, specialists), false)
 			if m.Role == RoleUser {
 				userMsgLines = append(userMsgLines, startLine)
 			}
@@ -58,7 +58,7 @@ func renderTranscript(s theme.Styles, messages []ChatMessage, width int, highlig
 	return sb.String(), userMsgLines
 }
 
-func renderMessage(s theme.Styles, m ChatMessage, width int, highlightUser, verboseTools, showReasoning bool, maxPreviewLines int) string {
+func renderMessage(s theme.Styles, m ChatMessage, width int, highlightUser, verboseTools, showReasoning bool, maxPreviewLines int, specialists []string) string {
 	switch m.Role {
 	case RoleUser:
 		label := s.MessageUser.Render("you")
@@ -92,7 +92,7 @@ func renderMessage(s theme.Styles, m ChatMessage, width int, highlightUser, verb
 		}
 		return lipgloss.JoinVertical(lipgloss.Left, lines...)
 	case RoleTool:
-		return renderTool(s, m.ToolName, m.ToolArgs, m.ToolResult, m.ToolStatus, m.ToolPending, verboseTools, width, maxPreviewLines)
+		return renderTool(s, m.ToolName, m.ToolArgs, m.ToolResult, m.ToolStatus, m.ToolPending, verboseTools, width, maxPreviewLines, specialists)
 	default:
 		return s.MessageEvent.Render(m.Content)
 	}
@@ -121,18 +121,19 @@ const toolGutter = "▏ "
 // generic key=value pairs (formatKV) and the result via the generic
 // summarizeResult, each on their own wrapped line below the call — long
 // output is expected here, so no effort is made to keep it to one line.
-// Both fall back to the same generic formatting for a tool this file
-// doesn't specifically know about (agent-as-tool specialist calls, a
-// future third-party tool) — those are already lean (a specialist's
-// result is its own prose, not noise), so the two modes look identical
-// for them either way.
+// Both fall back to generic formatting for a tool this file doesn't
+// specifically know about — an agent-as-tool specialist call (name is in
+// specialists) still shows its full prose reply either way, since that's
+// the actual answer, not noise to preview; anything else (in practice,
+// every MCP tool) gets the same lean/verbose cap as everything else —
+// see formatToolResult/summarizeGenericResult.
 //
 // While pending is true, the status always renders as its own
 // full-width filled badge line regardless of verboseTools — feedback
 // was that plain colored text blended in too easily to notice a
 // conversation was blocked waiting on a decision, and that's still true
 // whether or not the rest of this entry is lean.
-func renderTool(s theme.Styles, name string, args, result map[string]any, status string, pending, verboseTools bool, width, maxPreviewLines int) string {
+func renderTool(s theme.Styles, name string, args, result map[string]any, status string, pending, verboseTools bool, width, maxPreviewLines int, specialists []string) string {
 	callLine := s.ToolGutter.Render(toolGutter) + s.ToolCallName.Render(name)
 	if argsText := formatToolArgs(name, args); argsText != "" {
 		callLine += s.ToolCallArgs.Render("  " + argsText)
@@ -140,7 +141,7 @@ func renderTool(s theme.Styles, name string, args, result map[string]any, status
 
 	switch {
 	case result != nil:
-		text := formatToolResult(name, args, result, verboseTools, maxPreviewLines)
+		text := formatToolResult(name, args, result, verboseTools, maxPreviewLines, specialists)
 		if !verboseTools {
 			return callLine + s.MessageContent.Render("  ") + s.ToolResult.Render(text)
 		}

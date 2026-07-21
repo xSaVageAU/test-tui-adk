@@ -122,7 +122,7 @@ func (a *App) applyTheme() {
 // keystroke, resize, and cursor blink, so it has to leave scrolling
 // alone; see followTranscript for the variant that's allowed to move it.
 func (a *App) refreshTranscript() {
-	content, userMsgLines := renderTranscript(a.styles, a.messages, a.viewport.Width(), a.highlightUser, a.verboseTools, a.showReasoning, a.effectiveToolPreviewMaxLines())
+	content, userMsgLines := renderTranscript(a.styles, a.messages, a.viewport.Width(), a.highlightUser, a.verboseTools, a.showReasoning, a.effectiveToolPreviewMaxLines(), a.bootInfo.Specialists)
 	a.viewport.SetContent(content)
 	a.userMsgLines = userMsgLines
 }

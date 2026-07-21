@@ -6,6 +6,7 @@ package ui
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -122,10 +123,19 @@ const (
 // fit), verbose is the actual content/listing, capped at
 // maxPreviewLines. write_file's content comes from args, not result —
 // the call only ever gets bytesWritten back — so this is the one case
-// that reads args instead of result; every other tool ignores it. Falls
-// back to the generic summarizeResult both for an unrecognized tool and
-// for whichever piece a recognized tool's result doesn't match.
-func formatToolResult(name string, args, result map[string]any, verbose bool, maxPreviewLines int) string {
+// that reads args instead of result; every other tool ignores it.
+//
+// Falls back to summarizeResult (full text, uncapped, no lean/verbose
+// split) only for a name in specialists — an agent-as-tool specialist's
+// reply is a considered final answer, not raw data to preview, so it's
+// deliberately shown in full regardless of mode. Any other unrecognized
+// tool (every MCP tool, by construction — they're never in the switch
+// below) falls back to summarizeGenericResult instead, which gets the
+// same lean/verbose cap as everything else; showing an MCP tool's raw
+// result in full ignored the "tool output preview lines" setting
+// entirely and was a real cause of transcript-render slowdown on a
+// large result (a fetched web page, for instance).
+func formatToolResult(name string, args, result map[string]any, verbose bool, maxPreviewLines int, specialists []string) string {
 	switch name {
 	case "read_file":
 		if content, ok := result["content"].(string); ok {
@@ -189,8 +199,48 @@ func formatToolResult(name string, args, result map[string]any, verbose bool, ma
 		if status, ok := result["status"].(string); ok {
 			return status
 		}
+	default:
+		// name matched none of the cases above — a specialist's reply or
+		// a genuinely unrecognized tool (every MCP tool). Everything
+		// above this default, even a case that itself falls through
+		// (list_files verbose, a run_shell result missing "output", ...),
+		// still reaches the unconditional summarizeResult below —
+		// unchanged, existing behavior for a *known* tool's edge case.
+		// Only a name that matched no case at all gets the new split.
+		if slices.Contains(specialists, name) {
+			return summarizeResult(result)
+		}
+		return summarizeGenericResult(result, verbose, maxPreviewLines)
 	}
 	return summarizeResult(result)
+}
+
+// summarizeGenericResult is summarizeResult's lean/verbose-aware
+// counterpart for a tool formatToolResult doesn't specifically know
+// about and isn't a specialist's reply either — in practice, every MCP
+// tool. Same split every other tool gets: lean is a bare size/count,
+// verbose is the actual content capped at maxPreviewLines — never an
+// unbounded dump, unlike summarizeResult's single-string case (which
+// stays uncapped, deliberately, but only for a specialist's own final
+// answer — see formatToolResult).
+func summarizeGenericResult(result map[string]any, verbose bool, maxPreviewLines int) string {
+	if len(result) == 1 {
+		for k, v := range result {
+			switch val := v.(type) {
+			case string:
+				if !verbose {
+					return humanBytes(len(val))
+				}
+				return truncateLines(strings.TrimSpace(val), maxPreviewLines)
+			case []any:
+				if !verbose {
+					return fmt.Sprintf("%d %s", len(val), k)
+				}
+				return truncateLines(joinAny(val), maxPreviewLines)
+			}
+		}
+	}
+	return formatKV(result)
 }
 
 // truncateLines caps s at maxLines, noting how many lines were hidden

@@ -42,18 +42,18 @@ func TestFormatToolArgs(t *testing.T) {
 }
 
 func TestFormatToolResultLean(t *testing.T) {
-	if got := formatToolResult("read_file", nil, map[string]any{"content": "12345"}, false, toolPreviewMaxLinesDefault); got != "read 5 bytes" {
+	if got := formatToolResult("read_file", nil, map[string]any{"content": "12345"}, false, toolPreviewMaxLinesDefault, nil); got != "read 5 bytes" {
 		t.Errorf("read_file result = %q, want %q", got, "read 5 bytes")
 	}
 
 	// bytesWritten as a plain Go int (the handler's own return type).
-	if got := formatToolResult("write_file", nil, map[string]any{"bytesWritten": 2048}, false, toolPreviewMaxLinesDefault); got != "wrote 2.0 KB" {
+	if got := formatToolResult("write_file", nil, map[string]any{"bytesWritten": 2048}, false, toolPreviewMaxLinesDefault, nil); got != "wrote 2.0 KB" {
 		t.Errorf("write_file (int) result = %q, want %q", got, "wrote 2.0 KB")
 	}
 	// bytesWritten as float64 — what a JSON decode step would produce;
 	// covering both is the actual point of this test, since it's not
 	// certain from here which one ADK's event pipeline hands back.
-	if got := formatToolResult("write_file", nil, map[string]any{"bytesWritten": float64(2048)}, false, toolPreviewMaxLinesDefault); got != "wrote 2.0 KB" {
+	if got := formatToolResult("write_file", nil, map[string]any{"bytesWritten": float64(2048)}, false, toolPreviewMaxLinesDefault, nil); got != "wrote 2.0 KB" {
 		t.Errorf("write_file (float64) result = %q, want %q", got, "wrote 2.0 KB")
 	}
 
@@ -62,7 +62,7 @@ func TestFormatToolResultLean(t *testing.T) {
 	// since "verbose only changes the count's label" was exactly the
 	// confusing middle ground this replaced.
 	short := map[string]any{"files": []any{"a.go", "b.go"}}
-	if got := formatToolResult("list_files", nil, short, false, toolPreviewMaxLinesDefault); got != "2 entries" {
+	if got := formatToolResult("list_files", nil, short, false, toolPreviewMaxLinesDefault, nil); got != "2 entries" {
 		t.Errorf("list_files (short) result = %q, want %q", got, "2 entries")
 	}
 }
@@ -74,7 +74,7 @@ func TestFormatToolResultLean(t *testing.T) {
 func TestFormatToolResultWriteFileVerboseShowsContent(t *testing.T) {
 	args := map[string]any{"path": "foo.txt", "content": "line one\nline two"}
 	result := map[string]any{"bytesWritten": 17}
-	got := formatToolResult("write_file", args, result, true, toolPreviewMaxLinesDefault)
+	got := formatToolResult("write_file", args, result, true, toolPreviewMaxLinesDefault, nil)
 	if got != "line one\nline two" {
 		t.Errorf("write_file verbose result = %q, want the written content", got)
 	}
@@ -86,7 +86,7 @@ func TestFormatToolResultWriteFileVerboseShowsContent(t *testing.T) {
 // different wording.
 func TestFormatToolResultListFilesVerboseShowsNames(t *testing.T) {
 	result := map[string]any{"files": []any{"a.go", "b.go"}}
-	got := formatToolResult("list_files", nil, result, true, toolPreviewMaxLinesDefault)
+	got := formatToolResult("list_files", nil, result, true, toolPreviewMaxLinesDefault, nil)
 	want := summarizeResult(result)
 	if got != want || got == "2 entries" {
 		t.Errorf("list_files verbose = %q, want the full listing (%q)", got, want)
@@ -106,7 +106,7 @@ func TestFormatToolResultVerboseTruncatesAtConfiguredCap(t *testing.T) {
 		lines[i] = "line"
 	}
 	content := strings.Join(lines, "\n")
-	got := formatToolResult("read_file", nil, map[string]any{"content": content}, true, maxLines)
+	got := formatToolResult("read_file", nil, map[string]any{"content": content}, true, maxLines, nil)
 	gotLines := strings.Split(got, "\n")
 	if len(gotLines) != maxLines+1 { // +1 for the "… (N more lines)" note
 		t.Fatalf("got %d lines, want %d (cap) + 1 (note); output:\n%s", len(gotLines), maxLines, got)
@@ -116,29 +116,69 @@ func TestFormatToolResultVerboseTruncatesAtConfiguredCap(t *testing.T) {
 	}
 
 	short := strings.Join(lines[:10], "\n")
-	if got := formatToolResult("read_file", nil, map[string]any{"content": short}, true, maxLines); got != short {
+	if got := formatToolResult("read_file", nil, map[string]any{"content": short}, true, maxLines, nil); got != short {
 		t.Errorf("short content should pass through unchanged, got %q", got)
 	}
 }
 
 func TestFormatToolResultVerboseMatchesSummarizeResult(t *testing.T) {
 	result := map[string]any{"content": "the whole file, in full, no matter how long"}
-	got := formatToolResult("read_file", nil, result, true, toolPreviewMaxLinesDefault)
+	got := formatToolResult("read_file", nil, result, true, toolPreviewMaxLinesDefault, nil)
 	want := summarizeResult(result)
 	if got != want {
 		t.Errorf("verbose formatToolResult = %q, want summarizeResult's %q", got, want)
 	}
 }
 
-func TestFormatToolResultUnrecognizedToolAlwaysGeneric(t *testing.T) {
+// TestFormatToolResultSpecialistAlwaysFull covers a name in specialists
+// (an agent-as-tool call) — still shown in full, unaffected by lean vs.
+// verbose or the preview-lines cap, since it's the specialist's actual
+// answer, not raw data to preview.
+func TestFormatToolResultSpecialistAlwaysFull(t *testing.T) {
 	result := map[string]any{"result": "the specialist's full prose answer"}
-	lean := formatToolResult("research", nil, result, false, toolPreviewMaxLinesDefault)
-	verbose := formatToolResult("research", nil, result, true, toolPreviewMaxLinesDefault)
+	specialists := []string{"research"}
+	lean := formatToolResult("research", nil, result, false, toolPreviewMaxLinesDefault, specialists)
+	verbose := formatToolResult("research", nil, result, true, toolPreviewMaxLinesDefault, specialists)
 	if lean != verbose {
-		t.Errorf("lean/verbose diverged for an unrecognized tool: lean=%q verbose=%q", lean, verbose)
+		t.Errorf("lean/verbose diverged for a specialist: lean=%q verbose=%q", lean, verbose)
 	}
 	if lean != "the specialist's full prose answer" {
 		t.Errorf("got %q, want the bare prose (summarizeResult's single-string case)", lean)
+	}
+}
+
+// TestFormatToolResultGenericToolRespectsCap covers everything that
+// isn't one of this file's known tool names *and* isn't in specialists —
+// in practice, every MCP tool. This used to fall into the same unbounded
+// summarizeResult path a specialist's reply gets; it must not any more,
+// since an MCP tool's result is raw data (a fetched web page, e.g.), not
+// a considered final answer.
+func TestFormatToolResultGenericToolRespectsCap(t *testing.T) {
+	lines := make([]string, 80)
+	for i := range lines {
+		lines[i] = "line"
+	}
+	content := strings.Join(lines, "\n")
+	result := map[string]any{"content": content}
+
+	// No specialists list at all (nil) — same as a fresh session with no
+	// sub-agents configured.
+	lean := formatToolResult("fetch_url", nil, result, false, 50, nil)
+	if lean == content {
+		t.Errorf("lean result for an unrecognized tool must not be the raw uncapped content")
+	}
+	verbose := formatToolResult("fetch_url", nil, result, true, 50, nil)
+	if verbose == content {
+		t.Errorf("verbose result for an unrecognized tool must still be capped, got the full uncapped content")
+	}
+	if lean == verbose {
+		t.Errorf("lean/verbose should differ for a generic tool (bare size vs. capped content): both were %q", lean)
+	}
+
+	// Also not a specialist even when a specialists list IS present and
+	// non-empty — must not accidentally match by being non-empty.
+	if got := formatToolResult("fetch_url", nil, result, true, 50, []string{"research", "coder"}); got == content {
+		t.Errorf("a non-specialist name must still be capped even when other specialists exist")
 	}
 }
 
